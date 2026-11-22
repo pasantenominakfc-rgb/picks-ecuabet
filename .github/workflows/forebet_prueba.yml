@@ -1,7 +1,7 @@
 name: Prueba de Forebet (diagnóstico)
 
-# Prueba manual y mínima del actor de Apify solidcode/forebet-scraper: 1 corrida, máximo 5 partidos de HOY.
-# Imprime SOLO nombres de campos, cuántos partidos trajo y si hay campos de cuotas. No imprime el token.
+# Diagnóstico manual del actor de Apify: lanza 1 corrida asíncrona (máx. 10 partidos, solo hoy), espera hasta 8 min
+# y muestra estado, campos y cuotas. No imprime el token.
 on:
   workflow_dispatch:
 
@@ -11,50 +11,46 @@ permissions:
 jobs:
   prueba:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: Llamar al actor y mostrar la estructura
+      - name: Lanzar, esperar y mostrar la estructura
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: |
           python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.error
+          import json, os, sys, time, urllib.request, urllib.error
           from datetime import datetime, timedelta, timezone
           tok = os.environ.get("APIFY_TOKEN", "")
           if not tok:
               print("FALTA el secret APIFY_TOKEN"); sys.exit(1)
-          # 1) ¿el token es válido? (no ejecuta nada ni cuesta crédito)
-          print("longitud del token:", len(tok), "| espacios o saltos al borde:", tok != tok.strip(), "| empieza por apify_api_:", tok.startswith("apify_api_"))
-          try:
-              u = urllib.request.Request("https://api.apify.com/v2/users/me", headers={"Authorization": "Bearer " + tok})
-              with urllib.request.urlopen(u, timeout=30) as r:
-                  d = json.load(r).get("data", {})
-              print("token válido. plan:", d.get("plan", {}).get("id") if isinstance(d.get("plan"), dict) else d.get("plan"))
-          except urllib.error.HTTPError as e:
-              print("users/me HTTP", e.code, "=> el token NO es válido" if e.code == 401 else "")
-              sys.exit(1)
+          H = {"Authorization": "Bearer " + tok, "Content-Type": "application/json"}
+          def api(metodo, ruta, cuerpo=None):
+              rq = urllib.request.Request("https://api.apify.com/v2" + ruta, method=metodo, headers=H,
+                                          data=json.dumps(cuerpo).encode() if cuerpo is not None else None)
+              try:
+                  with urllib.request.urlopen(rq, timeout=60) as r:
+                      return json.load(r)
+              except urllib.error.HTTPError as e:
+                  print("HTTP", e.code, ruta.split("?")[0], e.read().decode("utf-8", "replace")[:300].replace(tok, "***")); sys.exit(1)
           hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
-          cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy + timedelta(days=1)),
-                    "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore", "halfTime", "doubleChance", "corners", "cards"],
-                    "countries": [], "leagues": [], "maxResults": 30}
-          req = urllib.request.Request(
-              "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=280",
-              data=json.dumps(cuerpo).encode(), method="POST",
-              headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
-          try:
-              with urllib.request.urlopen(req, timeout=300) as r:
-                  filas = json.load(r)
-          except urllib.error.HTTPError as e:
-              cuerpo_err = e.read().decode("utf-8", "replace")[:600].replace(tok, "***")
-              print("HTTP", e.code, "| respuesta del actor:", cuerpo_err); sys.exit(1)
-          except Exception as e:
-              print("Error:", e.__class__.__name__); sys.exit(1)
-          print("partidos devueltos:", len(filas), "| fechas:", sorted({str(x.get("kickoffDate")) for x in filas}))
-          if filas:
-              campos = sorted({k for f in filas for k in f})
+          entrada = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
+                     "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore"],
+                     "countries": [], "leagues": [], "maxResults": 10}
+          run = api("POST", "/acts/solidcode~forebet-scraper/runs", entrada)["data"]
+          print("run lanzado, estado:", run.get("status"))
+          t0 = time.time()
+          while run.get("status") not in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT") and time.time() - t0 < 480:
+              time.sleep(10)
+              run = api("GET", "/actor-runs/" + run["id"])["data"]
+          print("estado final:", run.get("status"), "| segundos:", int(time.time() - t0), "| mensaje:", run.get("statusMessage"))
+          print("costo USD:", run.get("usageTotalUsd"), "| cobrado:", json.dumps(run.get("chargedEventCounts")))
+          if run.get("status") not in ("SUCCEEDED",):
+              api("POST", "/actor-runs/" + run["id"] + "/abort")
+          items = api("GET", "/datasets/" + run["defaultDatasetId"] + "/items?format=json&clean=true")
+          print("partidos devueltos:", len(items))
+          if items:
+              campos = sorted({k for f in items for k in f})
               print("campos:", ", ".join(campos))
-              odds = [k for k in campos if any(s in k.lower() for s in ("odd", "cuota", "price", "bookmaker"))]
-              print("campos de cuotas:", odds or "NINGUNO")
-              ej = {k: (type(v).__name__) for k, v in filas[0].items()}
-              print("tipos del primer partido:", json.dumps(ej, ensure_ascii=False))
+              print("campos de cuotas:", [k for k in campos if "odd" in k.lower()] or "NINGUNO")
+              print("tipos del primero:", json.dumps({k: type(v).__name__ for k, v in items[0].items()}, ensure_ascii=False))
           PY
