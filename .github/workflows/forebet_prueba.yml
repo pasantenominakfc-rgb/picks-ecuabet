@@ -1,0 +1,48 @@
+name: Prueba de Forebet (diagnóstico)
+
+# Prueba manual y mínima del actor de Apify solidcode/forebet-scraper: 1 corrida, máximo 5 partidos de HOY.
+# Imprime SOLO nombres de campos, cuántos partidos trajo y si hay campos de cuotas. No imprime el token.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prueba:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Llamar al actor y mostrar la estructura
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error
+          from datetime import datetime, timedelta, timezone
+          tok = os.environ.get("APIFY_TOKEN", "")
+          if not tok:
+              print("FALTA el secret APIFY_TOKEN"); sys.exit(1)
+          hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
+          cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
+                    "countries": [], "leagues": [], "maxResults": 5}
+          req = urllib.request.Request(
+              "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=120",
+              data=json.dumps(cuerpo).encode(), method="POST",
+              headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
+          try:
+              with urllib.request.urlopen(req, timeout=150) as r:
+                  filas = json.load(r)
+          except urllib.error.HTTPError as e:
+              print("HTTP", e.code, "(sin mostrar la URL ni el token)"); sys.exit(1)
+          except Exception as e:
+              print("Error:", e.__class__.__name__); sys.exit(1)
+          print("partidos devueltos:", len(filas))
+          if filas:
+              campos = sorted({k for f in filas for k in f})
+              print("campos:", ", ".join(campos))
+              odds = [k for k in campos if any(s in k.lower() for s in ("odd", "cuota", "price", "bookmaker"))]
+              print("campos de cuotas:", odds or "NINGUNO")
+              ej = {k: (type(v).__name__) for k, v in filas[0].items()}
+              print("tipos del primer partido:", json.dumps(ej, ensure_ascii=False))
+          PY
