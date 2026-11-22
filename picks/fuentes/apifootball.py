@@ -90,9 +90,10 @@ class APIFootball:
                 "estado": f["fixture"]["status"]["short"], "gl": f["goals"]["home"], "gv": f["goals"]["away"],
                 "htl": ht.get("home"), "htv": ht.get("away")}
 
-    def partidos(self, fecha: str, ligas: set[int], tz: str = "America/Guayaquil") -> list[dict]:
+    def partidos(self, fecha: str, ligas: set[int] | None = None, tz: str = "America/Guayaquil") -> list[dict]:
+        """Partidos de una fecha (hora de Ecuador). ligas=None devuelve todos."""
         d = self._get("/fixtures", cache_horas=1, date=fecha, timezone=tz)
-        return [self._fixture(f) for f in d.get("response", []) if f["league"]["id"] in ligas]
+        return [self._fixture(f) for f in d.get("response", []) if ligas is None or f["league"]["id"] in ligas]
 
     def historico(self, liga: int, temporada: int) -> pd.DataFrame:
         filas = []

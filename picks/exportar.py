@@ -47,31 +47,40 @@ def combinada(valor: list[dict], cfg: dict) -> dict | None:
             "monto": max(cfg["stake_minimo"], round(cfg["banca"] * 0.005 * 4) / 4)}
 
 
-def hoy(partidos, valor, alta, cfg, creditos, seguras=None, grandes=None):
+def _sel(s):
+    return {k: s.get(k) for k in CAMPOS + ["region", "fecha"]}
+
+
+def hoy(partidos, dias: dict, cfg, creditos):
+    """hoy.json: todos los partidos (hoy a +5 días) y los picks de cada día."""
     lista_partidos = []
     for pa in sorted(partidos, key=lambda x: x["inicio"]):
         sel = sorted(pa.get("evaluadas", []), key=lambda s: -(s["ev"] or -1))
         lista_partidos.append({
-            "uid": pa["uid"], "liga": pa["liga"], "inicio": pa["inicio"], "local": pa["local"], "visita": pa["visita"],
+            "uid": pa["uid"], "liga": pa["liga"], "region": pa.get("region"), "fecha": pa["fecha"],
+            "inicio": pa["inicio"], "local": pa["local"], "visita": pa["visita"],
             "fuentes": list(pa["fuentes"]), "xg": pa.get("xg"), "esperados": pa.get("esperados"),
             "probs": {k: v["p"] for k, v in pa["probs"].items()},
             "selecciones": [{k: s.get(k) for k in ("clave", "nombre", "mercado", "p", "cuota_justa", "cuota_minima",
                                                    "mejor_cuota", "ev", "n_fuentes", "dispersion", "detalle")}
-                            for s in sel]})
+                            for s in sel[:12]]})
+    salida_dias = {}
+    for fecha, d in dias.items():
+        del_dia = [p for p in partidos if p["fecha"] == fecha]
+        salida_dias[fecha] = {
+            "valor": [_sel(s) for s in d["valor"]], "alta": [_sel(s) for s in d["alta"]],
+            "seguras": [_sel(s) for s in d["seguras"]],
+            "grandes": [{**{k: c[k] for k in ("objetivo", "monto", "ganancia", "cuota", "p", "ev")},
+                         "piernas": [_sel(s) for s in c["piernas"]]} for c in d["grandes"]],
+            "combinada": combinada(d["valor"], cfg),
+            "pool": [{k: s.get(k) for k in ("uid", "clave", "liga", "region", "fecha", "inicio", "local", "visita",
+                                            "nombre", "mercado", "p", "cuota_est", "tipo_cuota", "eficiencia", "ia",
+                                            "n_fuentes")} for s in niveles._pool_combinadas(del_dia, cfg)]}
     _guardar("hoy.json", {
         "generado": datetime.now(TZ).isoformat(), "creditos": creditos,
         "config": {k: cfg[k] for k in ("banca", "fraccion_kelly", "stake_max_pct", "ventaja_minima", "stake_minimo",
                                        "min_fuentes", "max_dispersion")},
-        "valor": [{k: s.get(k) for k in CAMPOS} for s in valor],
-        "alta": [{k: s.get(k) for k in CAMPOS} for s in alta],
-        "combinada": combinada(valor, cfg), "partidos": lista_partidos,
-        "seguras": [{k: s.get(k) for k in CAMPOS} for s in (seguras or [])],
-        "grandes": [{**{k: c[k] for k in ("objetivo", "monto", "ganancia", "cuota", "p", "ev")},
-                     "piernas": [{k: s.get(k) for k in CAMPOS} for s in c["piernas"]]} for c in (grandes or [])],
-        # piernas candidatas para el armador de combinadas de la web
-        "pool": [{k: s.get(k) for k in ("uid", "clave", "liga", "inicio", "local", "visita", "nombre", "mercado",
-                                        "p", "cuota_est", "tipo_cuota", "eficiencia", "ia", "n_fuentes")}
-                 for s in niveles._pool_combinadas(partidos, cfg)]})
+        "fechas": sorted(salida_dias), "dias": salida_dias, "partidos": lista_partidos})
 
 
 def historial():

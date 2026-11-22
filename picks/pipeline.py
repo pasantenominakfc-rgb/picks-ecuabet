@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import ensamble, mercados as M, names, seleccion, tracker
+from . import ensamble, mercados as M, names, niveles, regiones, seleccion, tracker
 from .fuentes import footballdata
 from .modelos.conteos import ModeloConteo
 from .modelos.goles import DixonColes
@@ -26,7 +26,7 @@ class Modelos:
         hist = pd.DataFrame()
         if liga.get("fd"):
             hist = footballdata.historico(liga["fd"], liga.get("tipo", "main"), cfg.get("peso_roja", 1))
-        if len(hist) < 60 and af and af.activa and temporada:
+        if len(hist) < 60 and af and af.activa and temporada and liga.get("historico", True):
             hist = af.historico(liga["af"], temporada)
         self.pb = None
         if len(hist) >= 60:
@@ -68,24 +68,36 @@ class Modelos:
         return {k: x for k, x in r.items() if not k.startswith("_")} if r else None
 
 
-def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> tuple[list, list, list]:
+def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> list[dict]:
+    """Analiza todos los partidos desde ahora hasta el final del día hoy + dias_adelante."""
     ahora = ahora or datetime.now(timezone.utc)
-    fin = ahora + timedelta(hours=cfg["horas_adelante"])
-    fechas = sorted({(ahora + timedelta(days=d)).astimezone(TZ).strftime("%Y-%m-%d")
-                     for d in range(0, cfg["horas_adelante"] // 24 + 2)})
+    dias = cfg.get("dias_adelante", 5)
+    hoy_local = ahora.astimezone(TZ).date()
+    fechas = [(hoy_local + timedelta(days=d)).isoformat() for d in range(dias + 1)]
+    fin = datetime.combine(hoy_local + timedelta(days=dias + 1), datetime.min.time(), TZ).astimezone(timezone.utc)
     ligas_af = {l["af"]: l for l in cfg["ligas"] if l.get("af")}
+    todas = cfg.get("incluir_todas_las_ligas", False)
+    regiones_ok = set(cfg.get("regiones_todas", []))
 
     # 1) partidos base (API-Football)
     fixtures = []
     if af and af.activa:
         for f in fechas:
-            fixtures += af.partidos(f, set(ligas_af))
+            fixtures += af.partidos(f, None if todas else set(ligas_af))
     fixtures = [f for f in fixtures if f["estado"] in ("NS", "TBD")
-                and ahora <= datetime.fromisoformat(f["inicio"]).astimezone(timezone.utc) <= fin]
-    print(f"Partidos en ventana: {len(fixtures)}")
+                and ahora <= datetime.fromisoformat(f["inicio"]).astimezone(timezone.utc) < fin]
+    if todas:  # ligas que no están en la lista: se agregan si son de las regiones elegidas
+        for f in fixtures:
+            if f["liga_id"] not in ligas_af:
+                reg = regiones.region(f.get("pais"), f.get("liga", ""))
+                if reg in regiones_ok:
+                    ligas_af[f["liga_id"]] = {"nombre": f"{f['liga']} ({f['pais']})", "region": reg, "af": f["liga_id"],
+                                              "historico": cfg.get("historico_ligas_extra", False)}
+        fixtures = [f for f in fixtures if f["liga_id"] in ligas_af]
+    print(f"Partidos del {fechas[0]} al {fechas[-1]}: {len(fixtures)} en {len({f['liga_id'] for f in fixtures})} ligas")
 
     # 2) fuentes externas una sola vez
-    fb_filas = forebet.predicciones() if forebet and forebet.activa else []
+    fb_filas = forebet.predicciones(dias + 1) if forebet and forebet.activa else []
     print(f"Forebet: {len(fb_filas)} pronósticos")
     calib = tracker.calibracion()
     prior = cfg["pesos_iniciales"]
@@ -101,7 +113,7 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> tup
         cuotas_af = {}
         for d in sorted({f["inicio"][:10] for f in fx_liga}):
             cuotas_af |= af.cuotas_liga(liga_id, temporada, d)
-        eventos_odds = odds.cuotas(liga["odds_key"], cfg["horas_adelante"]) if odds and odds.activa and \
+        eventos_odds = odds.cuotas(liga["odds_key"], 24 * (dias + 1)) if odds and odds.activa and \
             liga.get("odds_key") else []
 
         for fx in fx_liga:
@@ -135,12 +147,23 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> tup
             if not fuentes:
                 continue
             partidos.append({
-                "uid": str(fx["af_id"]), "af_id": fx["af_id"], "liga": liga["nombre"], "inicio": fx["inicio"],
+                "uid": str(fx["af_id"]), "af_id": fx["af_id"], "liga": liga["nombre"],
+                "region": liga.get("region") or regiones.region(fx.get("pais"), fx.get("liga", "")),
+                "inicio": fx["inicio"], "fecha": fx["inicio"][:10],
                 "local": fx["local"], "visita": fx["visita"], "fuentes": fuentes,
                 "probs": ensamble.combinar(fuentes, prior, calib, cfg),
                 "mejores": ensamble.mejores_cuotas(casas, cfg["casas_afiladas"], cfg["casa_objetivo"]),
                 "ecuabet": casas.get(cfg["casa_objetivo"], {}), "n_casas": len(casas),
                 "xg": (pm.get("_xg_local"), pm.get("_xg_visita")) if pm else None, "esperados": esperados})
+    return partidos
 
-    valor, alta = seleccion.elegir(partidos, cfg)
-    return partidos, valor, alta
+
+def picks_por_dia(partidos: list[dict], cfg: dict) -> dict:
+    """{fecha: {valor, alta, seguras, grandes}} calculado día por día."""
+    out = {}
+    for fecha in sorted({p["fecha"] for p in partidos}):
+        del_dia = [p for p in partidos if p["fecha"] == fecha]
+        valor, alta = seleccion.elegir(del_dia, cfg)
+        out[fecha] = {"valor": valor, "alta": alta, "seguras": niveles.seguras(del_dia, cfg),
+                      "grandes": niveles.grandes(del_dia, cfg)}
+    return out

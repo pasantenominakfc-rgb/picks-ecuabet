@@ -50,7 +50,7 @@ def elegir(partidos: list[dict], cfg: dict) -> tuple[list[dict], list[dict]]:
     for pa in partidos:
         cands = evaluar(pa, cfg)
         pa["evaluadas"] = cands
-        base = {k: pa[k] for k in ("uid", "liga", "inicio", "local", "visita", "af_id", "xg", "esperados")}
+        base = {k: pa.get(k) for k in ("uid", "liga", "region", "fecha", "inicio", "local", "visita", "af_id", "xg", "esperados")}
         v = [s for s in cands if _pasa_basico(s, cfg) and s["ev"] is not None and (s["ia"] or {}).get("riesgo") != "alto"
              and s["ev"] >= cfg["ventaja_minima"] and s["acuerdo"] >= cfg["min_acuerdo"]]
         if v:

@@ -74,6 +74,16 @@ Developer settings → **Fine-grained tokens** → solo este repositorio → per
 
 ---
 
+## Ligas y fechas
+
+- **Más de 40 ligas en la lista:**
+  - Europa: las 5 grandes y sus segundas divisiones, Países Bajos, Portugal, Bélgica, Turquía, Escocia, Grecia, Austria, Suiza, Dinamarca, Noruega, Suecia, Polonia, Champions, Europa League y Conference.
+  - Norte y Centroamérica: MLS, Liga MX y Concacaf.
+  - Sudamérica: LigaPro, Brasil A y B, Argentina, Colombia, Chile, Perú, Uruguay, Paraguay, Bolivia, Venezuela, Libertadores y Sudamericana.
+- **Modo "todas las ligas"** (`incluir_todas_las_ligas: true`): además de la lista, analiza cualquier liga de Europa, Norteamérica y Sudamérica que tenga partidos esas fechas.
+- **Fechas:** el sistema analiza de hoy a +5 días (`dias_adelante: 5`). En la app eliges el día y filtras por región y por liga.
+- Con tantas ligas se usan muchas consultas: el plan **Pro de API-Football** (USD 19/mes, 7 500 consultas/día) es lo recomendado.
+
 ## Los tres niveles de la app
 
 | Nivel | Qué es | Cuánto |

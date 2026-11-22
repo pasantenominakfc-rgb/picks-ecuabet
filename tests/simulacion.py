@@ -84,7 +84,8 @@ class FakeAF(APIFootball):
         for i in range(8):
             fid = int(rng.integers(1e6, 9e6))
             h, a = orden[2 * i], orden[2 * i + 1]
-            ini = (ahora + timedelta(hours=2 + i)).astimezone(pipeline.TZ).isoformat()
+            horas = 2 + i if i < 5 else 2 + 24 * (i - 4)     # 5 hoy y 3 en los próximos días
+            ini = (ahora + timedelta(hours=horas)).astimezone(pipeline.TZ).isoformat()
             self.fx[fid] = dict(h=h, a=a, ini=ini, fecha=ini[:10], estado="NS")
             self.por_fecha.setdefault(ini[:10], []).append(fid)
 
@@ -149,9 +150,9 @@ class FakeAF(APIFootball):
                                                  {"type": "Yellow Cards", "value": r["tjv"]}, {"type": "Red Cards", "value": 0}]}]}
         return {"response": []}
 
-    def terminar(self):
+    def terminar(self, hasta=None):
         for fid, f in self.fx.items():
-            if f["estado"] == "NS":
+            if f["estado"] == "NS" and (hasta is None or datetime.fromisoformat(f["ini"]) < hasta):
                 self.res[fid] = jugar(f["h"], f["a"])
                 f["estado"] = "FT"
 
@@ -192,13 +193,16 @@ for dia in range(25):
     ahora = inicio_sim + timedelta(days=dia)
     af.nuevo_dia(ahora)
     with contextlib.redirect_stdout(io.StringIO() if dia else sys.stdout):
-        partidos, valor, alta = pipeline.analizar(cfg, af, odds, fb, ahora)
+        partidos = pipeline.analizar(cfg, af, odds, fb, ahora)
+        dias = pipeline.picks_por_dia(partidos, cfg)
+        valor = [x for d in dias.values() for x in d["valor"]]
+        alta = [x for d in dias.values() for x in d["alta"]]
     tracker.guardar_predicciones(partidos)
     tracker.agregar_picks(valor, "valor")
     tracker.agregar_picks(alta, "alta")
     if dia == 24:
         break
-    af.terminar()
+    af.terminar(ahora + timedelta(hours=20))
     tracker.actualizar_resultados(af, cfg, ahora + timedelta(days=1))
 
 res, calib = tracker.resumen(), tracker.calibracion()
@@ -231,14 +235,14 @@ class FakeIA(AnalistaIA):
                 else "Rotaciones probables por partido de copa a mitad de semana."}
 
 
-seguras, grandes = niveles.seguras(partidos, cfg), niveles.grandes(partidos, cfg)
+dias = pipeline.picks_por_dia(partidos, cfg)
 ia = FakeIA("fake")
-print("IA revisó:", ia.revisar(partidos, valor + seguras + [x for c in grandes for x in c["piernas"]], cfg))
-valor, alta = seleccion.elegir(partidos, cfg)
-seguras, grandes = niveles.seguras(partidos, cfg), niveles.grandes(partidos, cfg)
-print("Seguras:", len(seguras), "Grandes:", [(c["objetivo"], round(c["cuota"], 1), round(c["p"], 3)) for c in grandes])
-print(report.texto_niveles(seguras, grandes)[:900])
-exportar.hoy(partidos, valor, alta, cfg, "simulación", seguras, grandes)
+cand = [x for d in dias.values() for x in d["valor"] + d["seguras"] + [p for c in d["grandes"] for p in c["piernas"]]]
+print("IA revisó:", ia.revisar(partidos, cand, cfg))
+dias = pipeline.picks_por_dia(partidos, cfg)
+for f, d in dias.items():
+    print(f, "valor", len(d["valor"]), "seguras", len(d["seguras"]), "grandes", len(d["grandes"]))
+exportar.hoy(partidos, dias, cfg, "simulación")
 exportar.historial()
 exportar.fuentes(cfg)
 

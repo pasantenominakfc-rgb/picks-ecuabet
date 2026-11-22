@@ -111,6 +111,7 @@ code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:5px}
 .leg:last-child{border-bottom:0}
 .big{font-size:30px;font-weight:780;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .chips.obj button{font-weight:650}
+.chips.fechas button{min-width:72px;font-weight:650;line-height:1.2}
 .prob-bar{height:8px;border-radius:5px;background:var(--chip);overflow:hidden;margin:6px 0}
 .prob-bar i{display:block;height:100%;background:var(--accent);border-radius:5px}
 .ok-ic{color:var(--good);font-weight:700} .no-ic{color:var(--bad);font-weight:700}
@@ -146,6 +147,37 @@ code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:5px}
 // ---------------------------------------------------------------- estado
 const D = {hoy:null, hist:null, fuentes:null, bt:null, sim:null};
 let nivel = LS_get0("nivel","seguras");
+let fechaSel = null, regionSel = "Todas", ligaSel = "Todas";
+const pasaFiltro = x => (regionSel==="Todas" || x.region===regionSel) && (ligaSel==="Todas" || x.liga===ligaSel);
+function dia(){
+  const vacio = {valor:[], alta:[], seguras:[], grandes:[], pool:[], combinada:null};
+  if(!D.hoy || !D.hoy.dias) return vacio;
+  if(!fechaSel || !D.hoy.dias[fechaSel]) fechaSel = (D.hoy.fechas||[])[0];
+  const d = D.hoy.dias[fechaSel] || vacio;
+  return {valor:d.valor.filter(pasaFiltro), alta:d.alta.filter(pasaFiltro), seguras:(d.seguras||[]).filter(pasaFiltro),
+          grandes:(d.grandes||[]).filter(c=>c.piernas.every(pasaFiltro)), pool:(d.pool||[]).filter(pasaFiltro), combinada:d.combinada};
+}
+function etiquetaFecha(f, i){
+  if(i===0) return "Hoy"; if(i===1) return "Mañana";
+  const d = new Date(f+"T12:00:00"); return DIAS[d.getDay()]+" "+d.getDate();
+}
+function barraFiltros(){
+  if(!D.hoy || !D.hoy.fechas) return "";
+  const fs = D.hoy.fechas;
+  if(!fechaSel || !fs.includes(fechaSel)) fechaSel = fs[0];
+  const delDia = D.hoy.partidos.filter(p=>p.fecha===fechaSel);
+  const regiones = ["Todas", ...["Europa","Sudamérica","Norteamérica"].filter(r=>delDia.some(p=>p.region===r))];
+  const ligas = ["Todas", ...new Set(delDia.filter(p=>regionSel==="Todas"||p.region===regionSel).map(p=>p.liga))];
+  if(!ligas.includes(ligaSel)) ligaSel = "Todas";
+  return `<div class="chips fechas">${fs.map((f,i)=>`<button class="${f===fechaSel?"on":""}" data-fecha="${f}">${etiquetaFecha(f,i)}<small style="display:block;font-size:10px;opacity:.7">${D.hoy.partidos.filter(p=>p.fecha===f).length} partidos</small></button>`).join("")}</div>
+    <div class="chips">${regiones.map(r=>`<button class="${r===regionSel?"on":""}" data-region="${esc(r)}">${r==="Todas"?"Todas las regiones":esc(r)}</button>`).join("")}</div>
+    <div class="chips">${ligas.map(l=>`<button class="${l===ligaSel?"on":""}" data-ligasel="${esc(l)}">${l==="Todas"?"Todas las ligas":esc(l)}</button>`).join("")}</div>`;
+}
+function ligarFiltros(el, rerender){
+  el.querySelectorAll("[data-fecha]").forEach(b=>b.onclick=()=>{ fechaSel=b.dataset.fecha; ligaSel="Todas"; rerender(); barra() });
+  el.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{ regionSel=b.dataset.region; ligaSel="Todas"; rerender(); barra() });
+  el.querySelectorAll("[data-ligasel]").forEach(b=>b.onclick=()=>{ ligaSel=b.dataset.ligasel; rerender(); barra() });
+}
 function LS_get0(k,d){ try{ const v=localStorage.getItem("picks."+k); return v===null?d:JSON.parse(v) }catch(e){ return d } }
 const LS = {
   get(k, d){ try{ const v = localStorage.getItem("picks."+k); return v===null? d : JSON.parse(v) }catch(e){ return d } },
@@ -232,7 +264,8 @@ function tarjeta(s, i, tipo){
 }
 function todosPicks(){
   if(!D.hoy) return [];
-  return [...D.hoy.valor.map(s=>({...s,_t:"valor"})), ...(D.hoy.seguras||[]).map(s=>({...s,_t:"segura"})), ...D.hoy.alta.map(s=>({...s,_t:"alta"}))];
+  // todos los días (para que el ticket conserve picks de otras fechas)
+  return Object.values(D.hoy.dias||{}).flatMap(d=>[...d.valor.map(s=>({...s,_t:"valor"})), ...(d.seguras||[]).map(s=>({...s,_t:"segura"})), ...d.alta.map(s=>({...s,_t:"alta"}))]);
 }
 function pintarCalc(k){
   const s = todosPicks().find(x=>key(x)===k), el = document.querySelector(`[data-calc="${CSS.escape(k)}"]`);
@@ -267,33 +300,33 @@ function combinadaHTML(c, monto, titulo){
   </div>`;
 }
 function vGrandes(){
-  const pool = D.hoy.pool||[];
+  const DD = dia();
   let h = `<div class="note">Combinadas para ganar mucho con poco. El sistema elige las selecciones que <b>más probabilidad conservan</b> por cada punto de cuota que suman. Aun así, la mayoría no se gana: mira la probabilidad real de cada una.</div>`;
   h += `<div class="card"><b>Arma la tuya</b>
     <label class="field"><span>Monto a apostar (USD)</span><input type="number" inputmode="decimal" id="g-monto" value="${gMonto}"></label>
     <div class="meta" style="margin-bottom:6px">Quiero ganar:</div>
     <div class="chips obj">${[50,100,200,500,1000].map(v=>`<button class="${v==gObj?"on":""}" data-obj="${v}">$${v}</button>`).join("")}</div>
     <div id="g-res"></div></div>`;
-  if((D.hoy.grandes||[]).length) h += `<h2>Combinadas sugeridas de hoy</h2>` + D.hoy.grandes.map(c=>combinadaHTML(c, c.monto, `Objetivo $${c.objetivo}`)).join("");
+  if(DD.grandes.length) h += `<h2>Combinadas sugeridas</h2>` + DD.grandes.map(c=>combinadaHTML(c, c.monto, `Objetivo $${c.objetivo}`)).join("");
   h += `<h2>Cómo se comportan</h2><div class="card meta">En la prueba con datos reales de los últimos 30 días, las piernas acertaron lo que el sistema predijo (63% contra 64% esperado), pero las combinadas de $100 y $200 se perdieron todas. Con 7–8 selecciones basta con que falle una. Apuesta en ellas solo lo que estés dispuesto a perder.</div>`;
   return h;
 }
 function pintarBuilder(){
   const el=$("#g-res"); if(!el) return;
-  const c = armar(D.hoy.pool||[], gObj/Math.max(0.5,gMonto));
-  el.innerHTML = c ? combinadaHTML(c, gMonto, `Para ganar ~$${gObj}`) : `<div class="empty">Con los partidos de hoy no se llega a ese objetivo con ese monto. Sube el monto o baja el objetivo.</div>`;
+  const c = armar(dia().pool, gObj/Math.max(0.5,gMonto));
+  el.innerHTML = c ? combinadaHTML(c, gMonto, `Para ganar ~$${gObj}`) : `<div class="empty">Con los partidos de este día no se llega a ese objetivo con ese monto. Sube el monto o baja el objetivo.</div>`;
 }
 function vHoy(){
   const el = $("#v-hoy");
   if(!D.hoy){ el.innerHTML = `<div class="card empty">Todavía no hay picks.<br>Cuando el sistema corra (todos los días 07:00 y 13:00) aparecerán aquí.</div>`; return }
-  const v = D.hoy.valor, a = D.hoy.alta, sg = D.hoy.seguras||[], gr = D.hoy.grandes||[];
-  let h = `<div class="seg" role="tablist">
+  const DD = dia(), v = DD.valor, a = DD.alta, sg = DD.seguras, gr = DD.grandes;
+  let h = barraFiltros() + `<div class="seg" role="tablist">
     <button class="${nivel==="seguras"?"on":""}" data-nivel="seguras">Seguras<small>${sg.length} picks</small></button>
     <button class="${nivel==="valor"?"on":""}" data-nivel="valor">Valor<small>${v.length} picks</small></button>
     <button class="${nivel==="grandes"?"on":""}" data-nivel="grandes">Grandes<small>${gr.length} combinadas</small></button></div>`;
   if(nivel==="seguras"){
     h += `<div class="note">Apuestas pequeñas con alta probabilidad (cuota 1.25–1.60). Escribe la cuota de Ecuabet y te digo si paga lo suficiente.</div>`;
-    h += sg.length ? sg.map((s,i)=>tarjeta(s,i+1,"segura")).join("") : `<div class="card empty">Hoy no hay selecciones con probabilidad suficiente.</div>`;
+    h += sg.length ? sg.map((s,i)=>tarjeta(s,i+1,"segura")).join("") : `<div class="card empty">No hay selecciones con probabilidad suficiente para este filtro.</div>`;
   } else if(nivel==="valor"){
     h += `<div class="note">Apuestas donde la cuota paga más de lo que vale. Son las más rentables a largo plazo, pero aparecen menos.</div>`;
     h += v.length ? v.map((s,i)=>tarjeta(s,i+1,"valor")).join("") : `<div class="card empty"><b>Hoy no hay apuestas de valor claras.</b><br>Revisa las seguras o escribe cuotas de Ecuabet en "Partidos".</div>`;
@@ -306,6 +339,7 @@ function vHoy(){
       <li>Si sale ✔, agrégalo al cupón de Ecuabet.</li><li>En el cupón toca <b>guardar/reservar apuesta</b>: ese es tu código.</li>
       <li>En <b>Ver ticket</b> toca <b>Registrar apuestas</b> para medir tu rendimiento.</li></ol></div>`;
   el.innerHTML = h;
+  ligarFiltros(el, vHoy);
   el.querySelectorAll("[data-nivel]").forEach(b=>b.onclick=()=>{ nivel=b.dataset.nivel; LS.set("nivel",nivel); vHoy(); barra() });
   if(nivel==="grandes"){
     $("#g-monto").oninput=e=>{ gMonto=+e.target.value||0; LS.set("gMonto",gMonto); pintarBuilder() };
@@ -384,17 +418,17 @@ async function despachar(wf, inputs){
 }
 
 // -------------------------------------------------------- PARTIDOS
-let filtroLiga = "Todas", busca = "";
+let busca = "";
 const PRINCIPALES = [["1x2:1","1"],["1x2:X","X"],["1x2:2","2"],["dc:1X","1X"],["dc:X2","X2"],["btts:si","Ambos marcan"],
   ["ou:1.5:over","+1.5 goles"],["ou:2.5:over","+2.5 goles"],["ou:3.5:over","+3.5 goles"],["ht1x2:X","Empate al descanso"],
   ["corners:9.5:over","+9.5 córners"],["cards:4.5:over","+4.5 tarjetas"]];
 function vPartidos(){
   const el = $("#v-partidos");
   if(!D.hoy){ el.innerHTML = `<div class="card empty">Sin datos.</div>`; return }
-  const ligas = ["Todas", ...new Set(D.hoy.partidos.map(p=>p.liga))];
-  const ps = D.hoy.partidos.filter(p=>(filtroLiga==="Todas"||p.liga===filtroLiga) && (`${p.local} ${p.visita}`.toLowerCase().includes(busca)));
-  el.innerHTML = `<input class="search" placeholder="Buscar equipo…" value="${esc(busca)}" id="busca">
-    <div class="chips">${ligas.map(l=>`<button class="${l===filtroLiga?"on":""}" data-liga="${esc(l)}">${esc(l)}</button>`).join("")}</div>
+  const filtros = barraFiltros();
+  const ps = D.hoy.partidos.filter(p=>p.fecha===fechaSel && pasaFiltro(p) && (`${p.local} ${p.visita}`.toLowerCase().includes(busca)));
+  el.innerHTML = filtros + `<input class="search" placeholder="Buscar equipo…" value="${esc(busca)}" id="busca">
+    <div class="meta" style="margin:0 2px 6px">${ps.length} partidos</div>
     ${ps.map(p=>{
       const pr=p.probs, e=p.esperados||{};
       const cor = e.corners||e.corners_fb, tar = e.tarjetas||e.tarjetas_fb;
@@ -410,8 +444,8 @@ function vPartidos(){
         <table style="margin-top:8px"><tr><th>Mejores selecciones</th><th>Prob.</th><th>Mín.</th><th>Valor</th></tr>
         ${p.selecciones.slice(0,8).map(s=>`<tr><td>${esc(s.nombre)}<br><span class="meta">${esc(s.mercado)} · ${s.n_fuentes} fuentes</span></td><td>${pct(s.p)}</td><td>${c2(s.cuota_minima)}</td><td class="${(s.ev||0)>0?"pos":"neg"}">${s.ev==null?"–":pct(s.ev,1)}</td></tr>`).join("")}</table>
       </div></details>`}).join("") || `<div class="card empty">Sin partidos con ese filtro.</div>`}`;
+  ligarFiltros(el, vPartidos);
   $("#busca").oninput = e=>{ busca=e.target.value.toLowerCase(); const pos=e.target.selectionStart; vPartidos(); const b=$("#busca"); b.focus(); b.setSelectionRange(pos,pos) };
-  el.querySelectorAll("[data-liga]").forEach(b=>b.onclick=()=>{ filtroLiga=b.dataset.liga; vPartidos() });
 }
 
 // ------------------------------------------------------------ gráfico

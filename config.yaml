@@ -24,14 +24,12 @@ cuota_max: 4.00
 min_fuentes: 2            # al menos 2 fuentes independientes deben opinar sobre ese mercado
 max_dispersion: 0.08      # desacuerdo máximo entre fuentes (desviación estándar de probabilidades)
 min_acuerdo: 0.67         # 2 de cada 3 fuentes deben ver valor por separado
-max_picks_dia: 6
 
 # Sección "alta probabilidad" (sin cuota de referencia, p. ej. tarjetas en ligas sin mercado)
 alta_prob_min: 0.72
 alta_cuota_justa_min: 1.25
 max_alta_prob: 6
 
-horas_adelante: 30
 
 # Combinada opcional (Ecuabet permite cargarla en un solo código). Ojo: el margen
 # de la casa se multiplica en cada selección; las simples son más rentables.
@@ -77,17 +75,61 @@ casa_objetivo: ecuabet
 forebet_linea_tarjetas: 4.5   # línea que usa Forebet en su pronóstico de tarjetas (verificar)
 max_predicciones_af: 40       # consultas /predictions por día (plan gratis: cuida el límite de 100)
 
+# --- Fechas -------------------------------------------------------------------
+dias_adelante: 5              # analiza hoy + 5 días (en la app eliges la fecha)
+max_picks_dia: 8              # por cada día
+
 # --- Ligas ------------------------------------------------------------------
-# af: id en API-Football | odds_key: The Odds API | fd: football-data (histórico con córners/tarjetas)
+# Modo "todas": además de la lista, analiza CUALQUIER liga que API-Football tenga
+# para esas fechas en los países/regiones de abajo (fuentes: cuotas + Forebet + IA).
+incluir_todas_las_ligas: true
+regiones_todas: [Europa, Sudamérica, Norteamérica]
+# Con muchas ligas se usan más consultas: el plan Pro de API-Football (7 500/día) es lo recomendado.
+
+# af: id en API-Football (verifica con: python main.py verificar) | odds_key: The Odds API |
+# fd: football-data (histórico con córners/tarjetas para los modelos propios)
 ligas:
-  - {nombre: Premier League,   af: 39,  odds_key: soccer_epl,                        fd: E0,  tipo: main}
-  - {nombre: LaLiga,           af: 140, odds_key: soccer_spain_la_liga,              fd: SP1, tipo: main}
-  - {nombre: Serie A,          af: 135, odds_key: soccer_italy_serie_a,              fd: I1,  tipo: main}
-  - {nombre: Bundesliga,       af: 78,  odds_key: soccer_germany_bundesliga,         fd: D1,  tipo: main}
-  - {nombre: Ligue 1,          af: 61,  odds_key: soccer_france_ligue_one,           fd: F1,  tipo: main}
-  - {nombre: Champions League, af: 2,   odds_key: soccer_uefa_champs_league}
-  - {nombre: Brasileirão,      af: 71,  odds_key: soccer_brazil_campeonato,          fd: BRA, tipo: extra}
-  - {nombre: Liga Argentina,   af: 128, odds_key: soccer_argentina_primera_division, fd: ARG, tipo: extra}
-  - {nombre: Libertadores,     af: 13,  odds_key: soccer_conmebol_copa_libertadores}
-  - {nombre: Sudamericana,     af: 11,  odds_key: soccer_conmebol_copa_sudamericana}
-  - {nombre: LigaPro Ecuador,  af: 242}
+  # ---------------- Europa ----------------
+  - {nombre: Premier League,     region: Europa, af: 39,  odds_key: soccer_epl,                        fd: E0,  tipo: main}
+  - {nombre: Championship,       region: Europa, af: 40,  odds_key: soccer_efl_champ,                  fd: E1,  tipo: main}
+  - {nombre: LaLiga,             region: Europa, af: 140, odds_key: soccer_spain_la_liga,              fd: SP1, tipo: main}
+  - {nombre: LaLiga 2,           region: Europa, af: 141, odds_key: soccer_spain_segunda_division,     fd: SP2, tipo: main}
+  - {nombre: Serie A,            region: Europa, af: 135, odds_key: soccer_italy_serie_a,              fd: I1,  tipo: main}
+  - {nombre: Serie B,            region: Europa, af: 136, odds_key: soccer_italy_serie_b,              fd: I2,  tipo: main}
+  - {nombre: Bundesliga,         region: Europa, af: 78,  odds_key: soccer_germany_bundesliga,         fd: D1,  tipo: main}
+  - {nombre: 2. Bundesliga,      region: Europa, af: 79,  odds_key: soccer_germany_bundesliga2,        fd: D2,  tipo: main}
+  - {nombre: Ligue 1,            region: Europa, af: 61,  odds_key: soccer_france_ligue_one,           fd: F1,  tipo: main}
+  - {nombre: Ligue 2,            region: Europa, af: 62,  odds_key: soccer_france_ligue_two,           fd: F2,  tipo: main}
+  - {nombre: Eredivisie,         region: Europa, af: 88,  odds_key: soccer_netherlands_eredivisie,     fd: N1,  tipo: main}
+  - {nombre: Primeira Liga,      region: Europa, af: 94,  odds_key: soccer_portugal_primeira_liga,     fd: P1,  tipo: main}
+  - {nombre: Pro League Bélgica, region: Europa, af: 144, odds_key: soccer_belgium_first_div,          fd: B1,  tipo: main}
+  - {nombre: Süper Lig Turquía,  region: Europa, af: 203, odds_key: soccer_turkey_super_league,        fd: T1,  tipo: main}
+  - {nombre: Premiership Escocia, region: Europa, af: 179, odds_key: soccer_spl,                       fd: SC0, tipo: main}
+  - {nombre: Superliga Grecia,   region: Europa, af: 197, odds_key: soccer_greece_super_league,        fd: G1,  tipo: main}
+  - {nombre: Bundesliga Austria, region: Europa, af: 218, odds_key: soccer_austria_bundesliga,         fd: AUT, tipo: extra}
+  - {nombre: Super League Suiza, region: Europa, af: 207, odds_key: soccer_switzerland_superleague,    fd: SWZ, tipo: extra}
+  - {nombre: Superliga Dinamarca, region: Europa, af: 119, odds_key: soccer_denmark_superliga,         fd: DNK, tipo: extra}
+  - {nombre: Eliteserien Noruega, region: Europa, af: 103, odds_key: soccer_norway_eliteserien,        fd: NOR, tipo: extra}
+  - {nombre: Allsvenskan Suecia, region: Europa, af: 113, odds_key: soccer_sweden_allsvenskan,         fd: SWE, tipo: extra}
+  - {nombre: Ekstraklasa Polonia, region: Europa, af: 106, odds_key: soccer_poland_ekstraklasa,        fd: POL, tipo: extra}
+  - {nombre: Champions League,   region: Europa, af: 2,   odds_key: soccer_uefa_champs_league}
+  - {nombre: Europa League,      region: Europa, af: 3,   odds_key: soccer_uefa_europa_league}
+  - {nombre: Conference League,  region: Europa, af: 848, odds_key: soccer_uefa_europa_conference_league}
+  # ---------------- Norte y Centroamérica ----------------
+  - {nombre: MLS,                region: Norteamérica, af: 253, odds_key: soccer_usa_mls,            fd: USA, tipo: extra}
+  - {nombre: Liga MX,            region: Norteamérica, af: 262, odds_key: soccer_mexico_ligamx,      fd: MEX, tipo: extra}
+  - {nombre: Concacaf Champions, region: Norteamérica, af: 16}
+  # ---------------- Sudamérica ----------------
+  - {nombre: LigaPro Ecuador,    region: Sudamérica, af: 242}
+  - {nombre: Brasileirão,        region: Sudamérica, af: 71,  odds_key: soccer_brazil_campeonato,          fd: BRA, tipo: extra}
+  - {nombre: Brasil Serie B,     region: Sudamérica, af: 72,  odds_key: soccer_brazil_serie_b}
+  - {nombre: Liga Argentina,     region: Sudamérica, af: 128, odds_key: soccer_argentina_primera_division, fd: ARG, tipo: extra}
+  - {nombre: Liga Colombia,      region: Sudamérica, af: 239}
+  - {nombre: Primera Chile,      region: Sudamérica, af: 265, odds_key: soccer_chile_campeonato}
+  - {nombre: Liga 1 Perú,        region: Sudamérica, af: 281}
+  - {nombre: Primera Uruguay,    region: Sudamérica, af: 268}
+  - {nombre: Primera Paraguay,   region: Sudamérica, af: 250}
+  - {nombre: Primera Bolivia,    region: Sudamérica, af: 344}
+  - {nombre: Primera Venezuela,  region: Sudamérica, af: 299}
+  - {nombre: Libertadores,       region: Sudamérica, af: 13,  odds_key: soccer_conmebol_copa_libertadores}
+  - {nombre: Sudamericana,       region: Sudamérica, af: 11,  odds_key: soccer_conmebol_copa_sudamericana}

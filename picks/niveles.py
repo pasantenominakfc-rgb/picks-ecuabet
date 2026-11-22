@@ -30,7 +30,7 @@ def _candidatas(partido: dict, cfg: dict) -> list[dict]:
         if s["n_fuentes"] < cfg.get("niveles_min_fuentes", 1) or (s.get("ia") or {}).get("riesgo") == "alto":
             continue
         cuota, tipo = cuota_estimada(s)
-        out.append({**{k: partido.get(k) for k in ("uid", "af_id", "liga", "inicio", "local", "visita")},
+        out.append({**{k: partido.get(k) for k in ("uid", "af_id", "liga", "region", "fecha", "inicio", "local", "visita")},
                     **s, "cuota_est": cuota, "tipo_cuota": tipo})
     return out
 

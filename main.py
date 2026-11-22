@@ -47,26 +47,33 @@ def hoy(cfg):
     n = tracker.actualizar_resultados(af, cfg)
     if n:
         print(f"✓ {n} picks liquidados")
-    partidos, valor, alta = pipeline.analizar(cfg, af, odds, fb)
-    seguras, grandes = niveles.seguras(partidos, cfg), niveles.grandes(partidos, cfg)
+    partidos = pipeline.analizar(cfg, af, odds, fb)
+    dias = pipeline.picks_por_dia(partidos, cfg)
     ia = AnalistaIA(cfg["groq_api_key"], cfg.get("ia_modelo", "groq/compound"), cfg.get("ia_max_consultas", 15))
-    if ia.activa:
-        candidatos = valor + seguras + [p for c in grandes for p in c["piernas"]]
-        n_ia = ia.revisar(partidos, candidatos, cfg)
-        print(f"IA (Groq): {n_ia} picks revisados")
-        valor, alta = seleccion.elegir(partidos, cfg)          # recalcula con la opinión de la IA
-        seguras, grandes = niveles.seguras(partidos, cfg), niveles.grandes(partidos, cfg)
+    if ia.activa and dias:
+        proximos = sorted(dias)[:2]            # la IA revisa hoy y mañana (las noticias cambian)
+        candidatos = [x for f in proximos for x in dias[f]["valor"] + dias[f]["seguras"]
+                      + [p for c in dias[f]["grandes"] for p in c["piernas"]]]
+        print(f"IA (Groq): {ia.revisar(partidos, candidatos, cfg)} picks revisados")
+        dias = pipeline.picks_por_dia(partidos, cfg)
     tracker.guardar_predicciones(partidos)
-    tracker.agregar_picks(valor, "valor")
-    tracker.agregar_picks(alta, "alta")
-    tracker.agregar_picks([{**x, "cuota_ecuabet": None, "monto": 0} for x in seguras], "segura")
+    for d in dias.values():
+        tracker.agregar_picks(d["valor"], "valor")
+        tracker.agregar_picks(d["alta"], "alta")
+        tracker.agregar_picks([{**x, "cuota_ecuabet": None, "monto": 0} for x in d["seguras"]], "segura")
     res, calib = tracker.resumen(), tracker.calibracion()
     creditos = f"API-Football: {af.restantes} · Odds API: {odds.restantes}"
-    h, t = report.guardar(valor, alta, partidos, cfg, res, calib, creditos)
-    exportar.hoy(partidos, valor, alta, cfg, creditos, seguras, grandes)
+    hoy_f = sorted(dias)[0] if dias else None
+    d0 = dias.get(hoy_f, {"valor": [], "alta": [], "seguras": [], "grandes": []})
+    del_hoy = [p for p in partidos if p["fecha"] == hoy_f]
+    h, t = report.guardar(d0["valor"], d0["alta"], del_hoy, cfg, res, calib, creditos)
+    exportar.hoy(partidos, dias, cfg, creditos)
     exportar.historial()
     exportar.fuentes(cfg)
-    msg = t.read_text(encoding="utf-8") + report.texto_niveles(seguras, grandes)
+    msg = t.read_text(encoding="utf-8") + report.texto_niveles(d0["seguras"], d0["grandes"])
+    otros = [f"{f}: {len(d['seguras'])} seguras, {len(d['valor'])} de valor" for f, d in dias.items() if f != hoy_f]
+    if otros:
+        msg += "\n\n📅 Próximos días (en la app):\n" + "\n".join(otros)
     if cfg.get("url_web"):
         msg += f"\n\n📱 {cfg['url_web']}"
     print("\n" + msg + f"\n\nReporte: {h}\n{creditos}")
