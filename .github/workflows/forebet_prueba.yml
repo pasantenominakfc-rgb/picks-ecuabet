@@ -11,7 +11,7 @@ permissions:
 jobs:
   prueba:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Llamar al actor y mostrar la estructura
         env:
@@ -38,11 +38,11 @@ jobs:
                     "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore", "halfTime", "doubleChance", "corners", "cards"],
                     "countries": [], "leagues": [], "maxResults": 5}
           req = urllib.request.Request(
-              "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=120",
+              "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=280",
               data=json.dumps(cuerpo).encode(), method="POST",
               headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
           try:
-              with urllib.request.urlopen(req, timeout=150) as r:
+              with urllib.request.urlopen(req, timeout=300) as r:
                   filas = json.load(r)
           except urllib.error.HTTPError as e:
               cuerpo_err = e.read().decode("utf-8", "replace")[:600].replace(tok, "***")
