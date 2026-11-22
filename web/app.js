@@ -434,8 +434,9 @@ function armar(pool, objCuota, maxP=8){
   return {piernas:el, cuota:c, p};
 }
 function combinadaHTML(c, monto, titulo, etiqueta="Grande"){
-  const m = (isFinite(+monto) && +monto>0) ? +monto : gMonto, cuota = +c.cuota, p = +c.p, L = c.piernas || [];
-  const neta = (c.ganancia!=null && isFinite(+c.ganancia)) ? +c.ganancia : m*(cuota-1);   // ganancia neta
+  // El monto es SIEMPRE el que escribe el usuario (gMonto): el servidor ya no define dólares; la ganancia se calcula aquí.
+  const m = gMonto > 0 ? gMonto : 5, cuota = +c.cuota, p = +c.p, L = c.piernas || [];
+  const neta = m*(cuota-1);   // ganancia neta
   const cobro = m + neta;
   const ev = (c.ev_estimado!=null && isFinite(+c.ev_estimado)) ? +c.ev_estimado : (c.ev!=null && isFinite(+c.ev)) ? +c.ev : p*cuota-1;
   const veces = p>0 ? Math.max(1, Math.round(1/p)) : null;
@@ -466,22 +467,35 @@ function vGrandes(DD, completo=true, filtrado=false){
     <div class="chips obj" role="group" aria-label="Cobro objetivo">${[50,100,200,500,1000].map(v=>`<button aria-pressed="${v==gObj}" data-obj="${v}">$${v}</button>`).join("")}</div>
     <div id="g-res" aria-live="polite"></div></div>`;
   }
-  if(DD.grandes.length) h += `<h2>Combinadas sugeridas</h2>` + DD.grandes.map(c=>combinadaHTML(c, c.monto, c.objetivo!=null?`Objetivo $${c.objetivo}`:"Combinada")).join("");
+  if(DD.grandes.length){
+    _sugFn = () => DD.grandes.map(c=>combinadaHTML(c, null, tituloSug(c))).join("");
+    h += `<h2>Combinadas sugeridas</h2><div${completo ? ` id="g-sug"` : ""}>${_sugFn()}</div>`;
+  }
   else if(filtrado) h += vacioHTML("search","Sin resultados con ese filtro","Prueba con otro equipo, liga o fecha.");
   else if(!completo) h += vacioHTML("rocket","Hoy no hay Grandes sugeridas","");
   if(completo) h += `<h2>Cómo se comportan</h2><div class="panel meta">En la prueba con datos reales de los últimos 30 días, las piernas acertaron lo que el sistema predijo (63% contra 64% esperado), pero las combinadas de $100 y $200 se perdieron todas. Con 7–8 selecciones basta con que falle una. Apuesta en ellas solo lo que estés dispuesto a perder.</div>`;
   return h;
 }
 // Combinadas: dias[f].combinadas si existe; si no, se muestran las Grandes con aviso (para no dejar la sección vacía de forma engañosa).
-function vCombinadas(DD, filtrado){
+function vCombinadas(DD, filtrado, conMonto=false){
   const falta = DD.combSinDato, L = falta ? DD.grandes : DD.combinadas;
   let h = falta ? avisoHTML("info","info","Solo se muestran las Grandes","Este análisis aún no trae combinadas propias; estas son las combinadas Grandes del día.") : "";
   h += avisoHTML("warn","alert","Casi nunca se ganan","Con varias selecciones basta que falle una. Mira siempre la probabilidad real y apuesta solo lo que estés dispuesto a perder.");
-  if(L.length) h += L.map(c=>combinadaHTML(c, c.monto, c.objetivo!=null?`Objetivo $${c.objetivo}`:"Combinada", falta?"Grande":"Combinada")).join("");
+  if(L.length){
+    _sugFn = () => L.map(c=>combinadaHTML(c, null, tituloSug(c), falta?"Grande":"Combinada")).join("");
+    h += (conMonto ? montoPanelHTML(false) : "") + `<div${conMonto ? ` id="g-sug"` : ""}>${_sugFn()}</div>`;
+  }
   else h += filtrado ? vacioHTML("search","Sin resultados con ese filtro","Prueba con otro equipo, liga o fecha.") : vacioHTML("rocket","Hoy no hay combinadas sugeridas","Vuelve tras el próximo análisis.");
   return h;
 }
+// Las sugeridas dependen del monto escrito: se repintan con él. Se dejan listas aquí para vGrandes/vCombinadas.
+let _sugFn = null;
+const tituloSug = c => isFinite(+c.cuota) ? `Cuota ${(+c.cuota).toFixed(1)}` : "Combinada";
+function montoPanelHTML(conObjetivo){
+  return `<div class="panel"><label class="field"><span>Monto a apostar (USD)</span><input type="text" inputmode="decimal" id="g-monto" value="${esc(gMonto)}" autocomplete="off"></label>${conObjetivo ? "" : `<div class="meta">La ganancia de cada combinada se calcula con tu monto.</div>`}</div>`;
+}
 function pintarBuilder(){
+  const sug=$("#g-sug"); if(sug && _sugFn) sug.innerHTML = gMonto>0 ? _sugFn() : "";
   const el=$("#g-res"); if(!el) return;
   if(!(gMonto>0)){ el.innerHTML = `<div class="empty">Escribe un monto mayor que 0.</div>`; return }
   const c = armar(dia().pool, gObj/Math.max(0.5,gMonto));
@@ -549,15 +563,15 @@ function pintarHoy(){
   }
   if(items.length>tope) h += `<div class="vermas"><button class="btn ghost" data-vermas="h">Ver más (${items.length-tope} de ${items.length})</button></div>`;
   if(sec.includes("grandes") && !(todos && !gr.length)) h += (todos ? `<h2>Grandes</h2>` : "") + vGrandes(DD, !todos, filtrado && !gr.length && !todos);
-  if(sec.includes("combinadas") && !(todos && (DD.combSinDato || !DD.combinadas.length))) h += (todos ? `<h2>Combinadas</h2>` : "") + vCombinadas(DD, filtrado);
+  if(sec.includes("combinadas") && !(todos && (DD.combSinDato || !DD.combinadas.length))) h += (todos ? `<h2>Combinadas</h2>` : "") + vCombinadas(DD, filtrado, !todos);
   if(todos && !items.length && !gr.length && !DD.combinadas.length) h += filtrado ? sinRes : vacioHTML("info","No hay picks para este día","Prueba con otra fecha.");
   h += `<details class="panel guia"><summary>Cómo usar tu selección en Ecuabet</summary><ol>
       <li>Toca <b>Copiar selección</b> o <b>+ Ticket</b> en los picks que quieres jugar.</li><li>Abre Ecuabet, busca cada partido y escribe aquí la cuota que ves.</li>
       <li>Si sale ✔, agrégalo al cupón de Ecuabet.</li><li>En el cupón toca <b>guardar/reservar apuesta</b>: ese es tu código (lo genera Ecuabet, no esta app).</li>
       <li>En <b>Ver ticket</b> toca <b>Registrar apuestas</b> para medir tu rendimiento.</li></ol></details>`;
   lista.innerHTML = h;
-  if(nivel==="grandes"){
-    $("#g-monto").oninput = e=>{ const x=parseFloat(String(e.target.value).replace(",",".")); gMonto=isFinite(x)&&x>0?x:0; if(gMonto>0) LS.set("gMonto",gMonto); pintarBuilder() };
+  if(nivel==="grandes" || nivel==="combinadas"){
+    const gm = $("#g-monto"); if(gm) gm.oninput = e=>{ const x=parseFloat(String(e.target.value).replace(",",".")); gMonto=isFinite(x)&&x>0?x:0; if(gMonto>0) LS.set("gMonto",gMonto); pintarBuilder() };
     lista.querySelectorAll("[data-obj]").forEach(b=>b.onclick=()=>{ gObj=+b.dataset.obj; LS.set("gObj",gObj); lista.querySelectorAll("[data-obj]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); pintarBuilder() });
     pintarBuilder();
   }
