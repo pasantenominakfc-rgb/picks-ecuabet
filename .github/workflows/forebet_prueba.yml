@@ -35,6 +35,7 @@ jobs:
               sys.exit(1)
           hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
           cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
+                    "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore", "halfTime", "doubleChance", "corners", "cards"],
                     "countries": [], "leagues": [], "maxResults": 5}
           req = urllib.request.Request(
               "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=120",
@@ -44,7 +45,8 @@ jobs:
               with urllib.request.urlopen(req, timeout=150) as r:
                   filas = json.load(r)
           except urllib.error.HTTPError as e:
-              print("HTTP", e.code, "(sin mostrar la URL ni el token)"); sys.exit(1)
+              cuerpo_err = e.read().decode("utf-8", "replace")[:600].replace(tok, "***")
+              print("HTTP", e.code, "| respuesta del actor:", cuerpo_err); sys.exit(1)
           except Exception as e:
               print("Error:", e.__class__.__name__); sys.exit(1)
           print("partidos devueltos:", len(filas))
