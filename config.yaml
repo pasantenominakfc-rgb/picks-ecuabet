@@ -50,7 +50,7 @@ combinada_selecciones: 2
 combinada_prob_min: 0.55
 
 # Dirección de tu página (se agrega al mensaje de Telegram)
-url_web: 
+url_web: https://pasantenominakfc-rgb.github.io/picks-ecuabet/
 
 # --- Niveles: seguras y grandes ------------------------------------------------
 seguras_prob_min: 0.72        # probabilidad mínima de una "segura"
