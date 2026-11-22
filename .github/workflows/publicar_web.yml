@@ -1,0 +1,33 @@
+# Publica SOLO la web (código de web/ + los últimos JSON de la rama `datos`). No analiza nada ni gasta consultas de APIs.
+# Útil cuando cambias la interfaz y no quieres esperar al próximo análisis.
+name: Publicar solo la web
+on:
+  workflow_dispatch: {}
+concurrency:
+  group: picks-pages
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment: {name: github-pages}
+    steps:
+      - uses: actions/checkout@v4                # TODO fijar por SHA
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v4                # TODO fijar por SHA
+        with: {ref: datos, path: datos, persist-credentials: false}
+      - name: Juntar la web con los últimos datos públicos
+        run: |
+          set -euo pipefail
+          mkdir -p web/data
+          if [ -d datos/web_data ]; then cp -r datos/web_data/. web/data/; else echo "::warning::La rama datos aún no tiene web_data"; fi
+          ls web/data
+      - uses: actions/upload-pages-artifact@v3   # TODO fijar por SHA
+        with: {path: web}
+      - uses: actions/deploy-pages@v4            # TODO fijar por SHA

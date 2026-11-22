@@ -1005,6 +1005,18 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
   $("#titulo").textContent=TIT[b.dataset.v]; window.scrollTo(0,0);
   ({hoy:vHoy,partidos:vPartidos,rend:vRend,fuentes:vFuentes,ajustes:vAjustes})[b.dataset.v](); barra();
 });
-$("#recargar").onclick=()=>{ cargar(); toast("Actualizando…") };
+// ↻ actualiza los datos Y la propia app: busca una versión nueva del service worker y, si la hay, recarga la página.
+$("#recargar").onclick=async()=>{
+  toast("Actualizando…");
+  try{ const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null; if(reg) await reg.update() }catch(e){}
+  cargar();   // si había versión nueva, el evento controllerchange recarga la página
+};
+let _recargado = false;
+try{
+  if("serviceWorker" in navigator){
+    const habiaControl = !!navigator.serviceWorker.controller;   // en la primera visita no se recarga
+    navigator.serviceWorker.addEventListener("controllerchange", ()=>{ if(!habiaControl || _recargado) return; _recargado = true; location.reload() });
+  }
+}catch(e){}
 try{ if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{}) }catch(e){}
 cargar();
