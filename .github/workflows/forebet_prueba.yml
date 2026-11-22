@@ -34,9 +34,9 @@ jobs:
               print("users/me HTTP", e.code, "=> el token NO es válido" if e.code == 401 else "")
               sys.exit(1)
           hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
-          cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
+          cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy + timedelta(days=1)),
                     "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore", "halfTime", "doubleChance", "corners", "cards"],
-                    "countries": [], "leagues": [], "maxResults": 5}
+                    "countries": [], "leagues": [], "maxResults": 30}
           req = urllib.request.Request(
               "https://api.apify.com/v2/acts/solidcode~forebet-scraper/run-sync-get-dataset-items?timeout=280",
               data=json.dumps(cuerpo).encode(), method="POST",
@@ -49,7 +49,7 @@ jobs:
               print("HTTP", e.code, "| respuesta del actor:", cuerpo_err); sys.exit(1)
           except Exception as e:
               print("Error:", e.__class__.__name__); sys.exit(1)
-          print("partidos devueltos:", len(filas))
+          print("partidos devueltos:", len(filas), "| fechas:", sorted({str(x.get("kickoffDate")) for x in filas}))
           if filas:
               campos = sorted({k for f in filas for k in f})
               print("campos:", ", ".join(campos))
