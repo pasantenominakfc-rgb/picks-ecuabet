@@ -94,13 +94,13 @@ forebet_linea_tarjetas: 4.5   # línea que usa Forebet en su pronóstico de tarj
 max_predicciones_af: 10       # consultas /predictions por día (plan gratis: 100 en total; perfil pro: 40)
 
 # --- Fechas -------------------------------------------------------------------
-dias_adelante: 2              # perfil gratis: hoy + 2 días (perfil pro: 5)
+dias_adelante: 5              # perfil gratis: hoy + 2 días (perfil pro: 5)
 max_picks_dia: 8              # por cada día
 
 # --- Ligas ------------------------------------------------------------------
 # Modo "todas": además de la lista, analiza CUALQUIER liga que API-Football tenga
 # para esas fechas en los países/regiones de abajo (fuentes: cuotas + Forebet + IA).
-incluir_todas_las_ligas: false   # perfil gratis: solo la lista de abajo (perfil pro: true)
+incluir_todas_las_ligas: true   # perfil gratis: solo la lista de abajo (perfil pro: true)
 regiones_todas: [Europa, Sudamérica, Norteamérica]
 # Con muchas ligas se usan más consultas: el plan Pro de API-Football (7 500/día) es lo recomendado.
 
