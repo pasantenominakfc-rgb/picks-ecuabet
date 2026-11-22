@@ -33,7 +33,7 @@ jobs:
               except urllib.error.HTTPError as e:
                   print("HTTP", e.code, ruta.split("?")[0], e.read().decode("utf-8", "replace")[:300].replace(tok, "***")); sys.exit(1)
           hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
-          entrada = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
+          entrada = {"matchScope": "byDate", "dateRange": "today and tomorrow",
                      "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore"],
                      "countries": [], "leagues": [], "maxResults": 10}
           run = api("POST", "/acts/solidcode~forebet-scraper/runs", entrada)["data"]
