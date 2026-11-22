@@ -8,7 +8,6 @@ un pick con riesgo "alto" sale de las seguras y de las combinadas.
 import json
 import re
 import time
-from datetime import date
 
 import requests
 
@@ -41,7 +40,8 @@ class AnalistaIA:
     def __init__(self, clave: str, modelo: str = "groq/compound", max_consultas: int = 15):
         self.clave, self.modelo, self.max = clave, modelo, max_consultas
         self.usadas = 0
-        self.cache_ruta = DATOS / "cache" / f"ia_{date.today()}.json"
+        from ..pipeline import hoy_ec  # import tardío: evita ciclo
+        self.cache_ruta = DATOS / "cache" / f"ia_{hoy_ec()}.json"
         self.cache_ruta.parent.mkdir(exist_ok=True)
         self.cache = json.loads(self.cache_ruta.read_text()) if self.cache_ruta.exists() else {}
 

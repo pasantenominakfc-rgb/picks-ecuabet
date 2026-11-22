@@ -1,3 +1,7 @@
 __pycache__/
-datos/cache/
+datos/
+.deps/
+reportes/
 .env
+web/data/*.json
+!web/data/.gitkeep

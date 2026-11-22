@@ -7,6 +7,15 @@ Para cada día, el sistema solo usa información anterior a ese día:
 Luego compara con el resultado real y calcula ganancias.
 
 Uso: python tests/ultimos30.py CARPETA_DATOS
+
+web/data/simulacion30.json NO contiene dólares (el repositorio es público). Claves:
+  - cada apuesta de valor/seguras/grandes: dia, partido, liga, pick, p, cuota, resultado, marcador y
+    `u` = resultado en unidades de apuesta (ganancia/monto: cuota-1 si gana, -1 si pierde, 0 si es nula);
+    las grandes llevan además objetivo, piernas y aciertos (la cuota es la cuota EFECTIVA: sin piernas nulas).
+  - resumen[tipo]: n, ganadas, acierto, prob_media, `u` (suma de u, apostando 1 unidad por pick) y `roi`
+    (fracción: ganancia/apostado ponderado por monto; el monto en dólares no se publica).
+  - periodo, partidos, acierto_favorito_1x2.
+No se publican `monto`, `ganancia`, `neto` ni `apostado`.
 """
 import json
 import sys
@@ -22,7 +31,7 @@ from picks.modelos.conteos import ModeloConteo  # noqa: E402
 from picks.modelos.goles import DixonColes  # noqa: E402
 from picks.modelos.pb import ModeloPB  # noqa: E402
 
-DATOS = Path(sys.argv[1]) if len(sys.argv) > 1 else None   # sin carpeta: descarga de football-data
+DATOS = None   # main() lo fija desde sys.argv; sin carpeta: descarga de football-data
 LIGAS = {"E0": ("Premier League", "premier-league"), "SP1": ("LaLiga", "la-liga"), "I1": ("Serie A", "serie-a"),
          "D1": ("Bundesliga", "bundesliga"), "F1": ("Ligue 1", "ligue-1")}
 FIN = pd.Timestamp.today().normalize() - pd.Timedelta(days=1)
@@ -70,88 +79,74 @@ def casas(f):
     return out
 
 
-cfg = config.cargar()
-cfg |= {"casa_objetivo": "bet365", "niveles_min_fuentes": 1, "min_fuentes": 1}
-prior = cfg["pesos_iniciales"]
+def pagar(r, monto: float, cuota: float):
+    """Ganancia neta de una apuesta según su resultado; None si no es liquidable (resultado None/desconocido)."""
+    if r == "ganada":
+        return monto * (cuota - 1)
+    if r == "perdida":
+        return -monto
+    if r == "nula":
+        return 0.0
+    return None
 
-registro = {"valor": [], "seguras": [], "grandes": []}
-por_dia = defaultdict(lambda: {"partidos": 0})
-todos_partidos = []
 
-for codigo, (nombre, slug) in LIGAS.items():
-    df = cargar(codigo, slug)
-    prueba = df[(df["fecha"] >= INICIO) & (df["fecha"] <= FIN)]
-    print(f"→ {nombre}: {len(prueba)} partidos de prueba")
-    for dia, grupo in prueba.groupby("fecha"):
-        train = df[(df["fecha"] < dia) & (df["fecha"] >= dia - pd.Timedelta(days=730))]
-        dc = DixonColes().ajustar(train)
-        mc = ModeloConteo().ajustar(train, "cl", "cv")
-        mt = ModeloConteo().ajustar(train, "tjl", "tjv")
-        mpb = ModeloPB().ajustar(train)
-        for _, f in grupo.iterrows():
-            f = f.to_dict()
-            uid = f"{codigo}-{dia:%Y%m%d}-{f['local']}"
-            cs = casas(f)
-            fuentes = {}
-            mkt = ensamble.probs_mercado(cs, cfg["casas_afiladas"], {"bet365"})
-            if mkt:
-                fuentes["mercado"] = mkt
-            pm = dc.mercados(f["local"], f["visita"]) if dc.ok else None
-            esperados = {}
-            if pm:
-                for fam, mod, nm in (("corners", mc, "corners"), ("cards", mt, "tarjetas")):
-                    if mod.ok:
-                        r = mod.prob_mas_de(f["local"], f["visita"], M.LINEAS[fam])
-                        if r:
-                            esperados[nm] = r.pop("_media")
-                            for ln, p in r.items():
-                                pm[f"{fam}:{ln}:over"], pm[f"{fam}:{ln}:under"] = p, 1 - p
-                fuentes["modelo"] = {k: v for k, v in pm.items() if not k.startswith("_")}
-            if mpb.ok:
-                r = mpb.mercados(f["local"], f["visita"])
-                if r:
-                    fuentes["penaltyblog"] = {k: v for k, v in r.items() if not k.startswith("_")}
-            if not fuentes:
-                continue
-            pa = {"uid": uid, "af_id": None, "liga": nombre, "inicio": f"{dia:%Y-%m-%d}T15:00:00+00:00",
-                  "local": f["local"], "visita": f["visita"], "fuentes": fuentes,
-                  "probs": ensamble.combinar(fuentes, prior, {}, cfg),
-                  "mejores": ensamble.mejores_cuotas(cs, cfg["casas_afiladas"], "bet365"),
-                  "ecuabet": cs.get("bet365", {}), "xg": (pm["_xg_local"], pm["_xg_visita"]) if pm else None,
-                  "esperados": esperados,
-                  "real": {"gl": int(f["gl"]), "gv": int(f["gv"]), "htl": f["htl"], "htv": f["htv"],
-                           "corners": int(f["cl"] + f["cv"]), "cards": int(f["tjl"] + f["tjv"])},
-                  "dia": f"{dia:%Y-%m-%d}"}
-            todos_partidos.append(pa)
+def _u(ganancia: float, monto: float) -> float:
+    return round(ganancia / monto, 4) if monto else 0.0
 
-# --- selección día por día (todas las ligas juntas, como la app) ----------------
-res = {p["uid"]: p["real"] for p in todos_partidos}
-dias = sorted({p["dia"] for p in todos_partidos})
-for d in dias:
-    pd_dia = [p for p in todos_partidos if p["dia"] == d]
+
+def _marcador(res: dict, uid: str) -> str:
+    return f"{res[uid]['gl']}-{res[uid]['gv']}"
+
+
+def fila_valor(d, s, res):
+    r = M.resultado(s["clave"], res[s["uid"]])
+    cuota = s["cuota_ecuabet"] or s["cuota_minima"]
+    gan = pagar(r, s["monto"], cuota)
+    if gan is None:
+        return None
+    return {"dia": d, "partido": f"{s['local']} vs {s['visita']}", "liga": s["liga"], "pick": s["nombre"],
+            "p": s["p"], "cuota": cuota, "monto": s["monto"], "resultado": r, "ganancia": round(gan, 2),
+            "marcador": _marcador(res, s["uid"])}
+
+
+def fila_segura(d, s, res):
+    r = M.resultado(s["clave"], res[s["uid"]])
+    gan = pagar(r, s["monto"], s["cuota_est"])
+    if gan is None:
+        return None
+    return {"dia": d, "partido": f"{s['local']} vs {s['visita']}", "liga": s["liga"], "pick": s["nombre"],
+            "p": s["p"], "cuota": s["cuota_est"], "tipo_cuota": s["tipo_cuota"], "monto": s["monto"],
+            "resultado": r, "ganancia": round(gan, 2), "marcador": _marcador(res, s["uid"])}
+
+
+def fila_combinada(d, c, res):
+    """Combinada liquidada con la cuota EFECTIVA (las piernas nulas salen): ganada paga monto*(cuota_ef-1),
+    nula (todas nulas) paga 0, perdida -monto. None si falta información (no liquidable)."""
+    r, cuota_ef = niveles.evaluar_combinada(c, res)
+    if r is None:
+        return None
+    gan = pagar(r, c["monto"], cuota_ef)
+    piernas = [{"partido": f"{s['local']} vs {s['visita']}", "pick": s["nombre"], "p": s["p"], "cuota": s["cuota_est"],
+                "acierto": M.resultado(s["clave"], res[s["uid"]]) == "ganada"} for s in c["piernas"]]
+    return {"dia": d, "objetivo": c["objetivo"], "monto": c["monto"], "cuota": round(cuota_ef, 2), "p": c["p"],
+            "piernas": piernas, "resultado": r, "ganancia": round(gan, 2),
+            "aciertos": sum(x["acierto"] for x in piernas)}
+
+
+def liquidar_dia(d, pd_dia, cfg, res, registro):
     valor, _ = seleccion.elegir(pd_dia, cfg)
     for s in valor:
-        r = M.resultado(s["clave"], res[s["uid"]])
-        cuota = s["cuota_ecuabet"] or s["cuota_minima"]
-        gan = {"ganada": s["monto"] * (cuota - 1), "perdida": -s["monto"], "nula": 0}[r]
-        registro["valor"].append({"dia": d, "partido": f"{s['local']} vs {s['visita']}", "liga": s["liga"],
-                                  "pick": s["nombre"], "p": s["p"], "cuota": cuota, "monto": s["monto"],
-                                  "resultado": r, "ganancia": round(gan, 2), "marcador": f"{res[s['uid']]['gl']}-{res[s['uid']]['gv']}"})
+        f = fila_valor(d, s, res)
+        if f:
+            registro["valor"].append(f)
     for s in niveles.seguras(pd_dia, cfg):
-        r = M.resultado(s["clave"], res[s["uid"]])
-        gan = {"ganada": s["monto"] * (s["cuota_est"] - 1), "perdida": -s["monto"], "nula": 0}[r]
-        registro["seguras"].append({"dia": d, "partido": f"{s['local']} vs {s['visita']}", "liga": s["liga"],
-                                    "pick": s["nombre"], "p": s["p"], "cuota": s["cuota_est"], "tipo_cuota": s["tipo_cuota"],
-                                    "monto": s["monto"], "resultado": r, "ganancia": round(gan, 2),
-                                    "marcador": f"{res[s['uid']]['gl']}-{res[s['uid']]['gv']}"})
+        f = fila_segura(d, s, res)
+        if f:
+            registro["seguras"].append(f)
     for c in niveles.grandes(pd_dia, cfg):
-        r = niveles.resultado_combinada(c, res)
-        piernas = [{"partido": f"{s['local']} vs {s['visita']}", "pick": s["nombre"], "p": s["p"], "cuota": s["cuota_est"],
-                    "acierto": M.resultado(s["clave"], res[s["uid"]]) == "ganada"} for s in c["piernas"]]
-        registro["grandes"].append({"dia": d, "objetivo": c["objetivo"], "monto": c["monto"], "cuota": round(c["cuota"], 2),
-                                    "p": c["p"], "piernas": piernas, "resultado": r,
-                                    "ganancia": round(c["monto"] * (c["cuota"] - 1) if r == "ganada" else -c["monto"], 2),
-                                    "aciertos": sum(x["acierto"] for x in piernas)})
+        f = fila_combinada(d, c, res)
+        if f:
+            registro["grandes"].append(f)
 
 
 def resumen(lista):
@@ -161,30 +156,106 @@ def resumen(lista):
     g = sum(1 for x in lista if x["resultado"] == "ganada")
     ap = sum(x["monto"] for x in lista)
     neto = sum(x["ganancia"] for x in lista)
-    return {"n": n, "ganadas": g, "acierto": g / n, "apostado": round(ap, 2), "neto": round(neto, 2),
+    return {"n": n, "ganadas": g, "acierto": g / n, "u": round(sum(_u(x["ganancia"], x["monto"]) for x in lista), 2),
             "roi": neto / ap if ap else 0, "prob_media": sum(x["p"] for x in lista) / n}
 
 
-# precisión simple de "el favorito según el sistema"
-acierto_1x2 = []
-for p in todos_partidos:
-    pr = {k: p["probs"][k]["p"] for k in ("1x2:1", "1x2:X", "1x2:2") if k in p["probs"]}
-    if len(pr) == 3:
-        fav = max(pr, key=pr.get)
-        acierto_1x2.append(M.resultado(fav, p["real"]) == "ganada")
+def _publica(x):
+    """Fila pública: sin dólares (monto/ganancia se reemplazan por u)."""
+    out = {k: v for k, v in x.items() if k not in ("monto", "ganancia")}
+    out["u"] = _u(x["ganancia"], x["monto"])
+    return out
 
-salida = {"periodo": f"{INICIO:%d/%m/%Y} – {FIN:%d/%m/%Y}", "partidos": len(todos_partidos),
-          "acierto_favorito_1x2": sum(acierto_1x2) / len(acierto_1x2),
-          "resumen": {k: resumen(v) for k, v in registro.items()}, **registro}
-(RAIZ / "web" / "data").mkdir(parents=True, exist_ok=True)
-(RAIZ / "web" / "data" / "simulacion30.json").write_text(json.dumps(salida, ensure_ascii=False, default=float), encoding="utf-8")
 
-print(f"\nPartidos analizados: {salida['partidos']} | el favorito del sistema acertó el 1X2 en {salida['acierto_favorito_1x2']:.0%}")
-for k, r in salida["resumen"].items():
-    if r["n"]:
-        print(f"{k.upper():8s} n={r['n']:3d} ganadas={r['ganadas']:3d} ({r['acierto']:.0%}, prob. media {r['prob_media']:.0%}) "
-              f"apostado ${r['apostado']:.2f} neto ${r['neto']:+.2f} ROI {r['roi']:+.1%}")
-print("\nCombinadas:")
-for c in registro["grandes"]:
-    print(f"  {c['dia']} objetivo ${c['objetivo']} cuota {c['cuota']} prob {c['p']:.1%} → {c['resultado']} "
-          f"({c['aciertos']}/{len(c['piernas'])} piernas)")
+def armar_salida(registro, n_partidos, acierto_favorito, periodo):
+    """Dict que se escribe en simulacion30.json: sin dólares (ver docstring del módulo)."""
+    return {"periodo": periodo, "partidos": n_partidos, "acierto_favorito_1x2": acierto_favorito,
+            "resumen": {k: resumen(v) for k, v in registro.items()},
+            **{k: [_publica(x) for x in v] for k, v in registro.items()}}
+
+
+def main():
+    global DATOS
+    DATOS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+    cfg = config.cargar()
+    cfg |= {"casa_objetivo": "bet365", "niveles_min_fuentes": 1, "min_fuentes": 1}
+    prior = cfg["pesos_iniciales"]
+    registro = {"valor": [], "seguras": [], "grandes": []}
+    todos_partidos = []
+
+    for codigo, (nombre, slug) in LIGAS.items():
+        df = cargar(codigo, slug)
+        prueba = df[(df["fecha"] >= INICIO) & (df["fecha"] <= FIN)]
+        print(f"→ {nombre}: {len(prueba)} partidos de prueba")
+        for dia, grupo in prueba.groupby("fecha"):
+            train = df[(df["fecha"] < dia) & (df["fecha"] >= dia - pd.Timedelta(days=730))]
+            dc = DixonColes().ajustar(train)
+            mc = ModeloConteo().ajustar(train, "cl", "cv")
+            mt = ModeloConteo().ajustar(train, "tjl", "tjv")
+            mpb = ModeloPB().ajustar(train)
+            for _, f in grupo.iterrows():
+                f = f.to_dict()
+                uid = f"{codigo}-{dia:%Y%m%d}-{f['local']}"
+                cs = casas(f)
+                fuentes = {}
+                mkt = ensamble.probs_mercado(cs, cfg["casas_afiladas"], {"bet365"})
+                if mkt:
+                    fuentes["mercado"] = mkt
+                pm = dc.mercados(f["local"], f["visita"]) if dc.ok else None
+                esperados = {}
+                if pm:
+                    for fam, mod, nm in (("corners", mc, "corners"), ("cards", mt, "tarjetas")):
+                        if mod.ok:
+                            r = mod.prob_mas_de(f["local"], f["visita"], M.LINEAS[fam])
+                            if r:
+                                esperados[nm] = r.pop("_media")
+                                for ln, p in r.items():
+                                    pm[f"{fam}:{ln}:over"], pm[f"{fam}:{ln}:under"] = p, 1 - p
+                    fuentes["modelo"] = {k: v for k, v in pm.items() if not k.startswith("_")}
+                if mpb.ok:
+                    r = mpb.mercados(f["local"], f["visita"])
+                    if r:
+                        fuentes["penaltyblog"] = {k: v for k, v in r.items() if not k.startswith("_")}
+                if not fuentes:
+                    continue
+                pa = {"uid": uid, "af_id": None, "liga": nombre, "inicio": f"{dia:%Y-%m-%d}T15:00:00+00:00",
+                      "local": f["local"], "visita": f["visita"], "fuentes": fuentes,
+                      "probs": ensamble.combinar(fuentes, prior, {}, cfg),
+                      "mejores": ensamble.mejores_cuotas(cs, cfg["casas_afiladas"], "bet365"),
+                      "ecuabet": cs.get("bet365", {}), "xg": (pm["_xg_local"], pm["_xg_visita"]) if pm else None,
+                      "esperados": esperados,
+                      "real": {"gl": int(f["gl"]), "gv": int(f["gv"]), "htl": f["htl"], "htv": f["htv"],
+                               "corners": int(f["cl"] + f["cv"]), "cards": int(f["tjl"] + f["tjv"])},
+                      "dia": f"{dia:%Y-%m-%d}"}
+                todos_partidos.append(pa)
+
+    # --- selección día por día (todas las ligas juntas, como la app) ----------------
+    res = {p["uid"]: p["real"] for p in todos_partidos}
+    for d in sorted({p["dia"] for p in todos_partidos}):
+        liquidar_dia(d, [p for p in todos_partidos if p["dia"] == d], cfg, res, registro)
+
+    acierto_1x2 = []
+    for p in todos_partidos:
+        pr = {k: p["probs"][k]["p"] for k in ("1x2:1", "1x2:X", "1x2:2") if k in p["probs"]}
+        if len(pr) == 3:
+            fav = max(pr, key=pr.get)
+            acierto_1x2.append(M.resultado(fav, p["real"]) == "ganada")
+
+    salida = armar_salida(registro, len(todos_partidos), sum(acierto_1x2) / len(acierto_1x2),
+                          f"{INICIO:%d/%m/%Y} – {FIN:%d/%m/%Y}")
+    (RAIZ / "web" / "data").mkdir(parents=True, exist_ok=True)
+    (RAIZ / "web" / "data" / "simulacion30.json").write_text(json.dumps(salida, ensure_ascii=False, default=float), encoding="utf-8")
+
+    print(f"\nPartidos analizados: {salida['partidos']} | el favorito del sistema acertó el 1X2 en {salida['acierto_favorito_1x2']:.0%}")
+    for k, r in salida["resumen"].items():
+        if r["n"]:
+            print(f"{k.upper():8s} n={r['n']:3d} ganadas={r['ganadas']:3d} ({r['acierto']:.0%}, prob. media {r['prob_media']:.0%}) "
+                  f"u={r['u']:+.2f} ROI {r['roi']:+.1%}")
+    print("\nCombinadas:")
+    for c in registro["grandes"]:
+        print(f"  {c['dia']} objetivo ${c['objetivo']} cuota {c['cuota']} prob {c['p']:.1%} → {c['resultado']} "
+              f"({c['aciertos']}/{len(c['piernas'])} piernas)")
+
+
+if __name__ == "__main__":
+    main()

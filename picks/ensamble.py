@@ -77,7 +77,9 @@ def pesos(fam: str, disponibles: list[str], prior: dict[str, float], calib: dict
             base *= math.exp(-conf * (v["ll"] - ll_min) / tau)
         w[s] = base
     tot = sum(w.values())
-    return {s: x / tot for s, x in w.items()} if tot else {}
+    if not tot:   # todos los pesos en 0: pesos uniformes en vez de un KeyError aguas abajo
+        return {s: 1 / len(disponibles) for s in disponibles} if disponibles else {}
+    return {s: x / tot for s, x in w.items()}
 
 
 def combinar(fuentes: dict[str, dict], prior: dict, calib: dict, cfg: dict) -> dict:

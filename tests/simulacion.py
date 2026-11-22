@@ -1,9 +1,15 @@
 """Simulación sin internet de 25 días: fuentes falsas con el formato real de las APIs.
 Verifica parseo, ensamble, selección, liquidación de todos los mercados y que los pesos
-se ajusten castigando a la fuente más ruidosa (API-Football simulada con mucho ruido)."""
-import shutil
-import sqlite3
+se ajusten castigando a la fuente más ruidosa (API-Football simulada con mucho ruido).
+
+AISLAMIENTO: todo se escribe en un directorio temporal (base, caché, reportes y web/data). Las rutas se
+reemplazan con monkeypatch desde este script (config.DATOS, tracker.RUTA, report.REPORTES, exportar.WEB y
+cualquier otro módulo de picks que importó DATOS), sin tocar el código del proyecto. Un archivo centinela
+en el datos/ real comprueba al final que la simulación no lo borró."""
+import json
+import os
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +19,15 @@ from scipy.stats import poisson
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
-shutil.rmtree(RAIZ / "datos", ignore_errors=True)
+os.environ["PICKS_SIMULACION"] = "1"
+
+# centinela en el datos/ REAL (si el script lo tocara, desaparecería)
+DATOS_REAL = RAIZ / "datos"
+DATOS_REAL.mkdir(exist_ok=True)
+CENTINELA = DATOS_REAL / f".centinela_simulacion_{os.getpid()}"   # único por proceso (pruebas en paralelo)
+CENTINELA.write_text("no borrar: lo comprueba tests/simulacion.py", encoding="utf-8")
+_db_real = DATOS_REAL / "sistema.db"
+_db_real_antes = (_db_real.stat().st_mtime_ns, _db_real.stat().st_size) if _db_real.exists() else None
 
 from picks import config, pipeline, report, tracker  # noqa: E402
 from picks.fuentes import footballdata  # noqa: E402
@@ -21,6 +35,24 @@ from picks.fuentes.apifootball import APIFootball  # noqa: E402
 from picks.fuentes.forebet import Forebet, a_claves  # noqa: E402
 from picks.fuentes.oddsapi import OddsAPI  # noqa: E402
 from picks.modelos.goles import mercados_desde_goles  # noqa: E402
+
+# --- aislamiento: directorio temporal --------------------------------------------
+TMP = Path(tempfile.mkdtemp(prefix="picks_sim_"))
+_datos_original = config.DATOS
+for sub in ("datos/cache", "reportes", "web_data"):
+    (TMP / sub).mkdir(parents=True, exist_ok=True)
+config.DATOS, config.REPORTES = TMP / "datos", TMP / "reportes"
+for _m in list(sys.modules.values()):                # módulos que hicieron `from .config import DATOS`
+    if getattr(_m, "__name__", "").startswith("picks"):
+        if getattr(_m, "DATOS", None) == _datos_original:
+            _m.DATOS = TMP / "datos"
+        if getattr(_m, "REPORTES", None) == RAIZ / "reportes":
+            _m.REPORTES = TMP / "reportes"
+tracker.RUTA = TMP / "datos" / "sistema.db"
+report.REPORTES = TMP / "reportes"
+WEB_REAL = RAIZ / "web" / "data"
+_web_antes = {f: f.stat().st_mtime_ns for f in WEB_REAL.glob("*.json")} if WEB_REAL.exists() else {}
+print("Directorio temporal de la simulación:", TMP)
 
 rng = np.random.default_rng(11)
 EQ = ["Arsenal", "Chelsea", "Liverpool", "Manchester City", "Manchester United", "Tottenham", "Newcastle",
@@ -222,6 +254,8 @@ print("HTML:", h)
 # --- exportar para la web + backtest sintético --------------------------------
 from picks import backtest, exportar  # noqa: E402
 
+exportar.WEB = TMP / "web_data"
+
 from picks import niveles, seleccion  # noqa: E402
 from picks.fuentes.ia import AnalistaIA  # noqa: E402
 
@@ -269,3 +303,42 @@ res_bt = backtest.resumir(backtest.liga("E0", "Premier League", cfg, dfb)["apues
 exportar.backtest(res_bt)
 for f, r in res_bt.items():
     print(f"BACKTEST {f}: n={r['n']} acierto {r['acierto']:.0%} ROI {r['roi']:+.1%} CLV {r['clv']:+.1%} racha {r['max_racha_perdidas']}")
+
+
+# --- aserciones reales ----------------------------------------------------------------
+def _sin_nan(texto):
+    def malo(c):
+        raise AssertionError(f"JSON con {c}")
+    return json.loads(texto, parse_constant=malo)
+
+
+with tracker.con() as _c:
+    n_picks = _c.execute("SELECT COUNT(*) FROM picks").fetchone()[0]
+assert n_picks > 0, "la simulación no generó ningún pick"
+
+pesos_1x2 = partidos[0]["probs"]["1x2:1"]["pesos"]
+assert pesos_1x2["apifootball"] < pesos_1x2["mercado"], f"apifootball debía pesar menos que mercado: {pesos_1x2}"
+
+if res.get("n"):
+    assert -0.5 <= res["roi"] <= 0.5, f"ROI fuera de rango: {res['roi']}"
+else:
+    print("AVISO: sin apuestas registradas con cuota tomada; no se evalúa el ROI real.")
+
+jsons = sorted((TMP / "web_data").glob("*.json"))
+assert {j.name for j in jsons} >= {"hoy.json", "historial.json", "fuentes.json", "backtest.json"}, jsons
+for j in jsons:
+    texto = j.read_text(encoding="utf-8")
+    datos = _sin_nan(texto)
+    assert '"banca"' not in texto, f"{j.name} publica la banca"
+    if j.name == "historial.json":
+        assert '"monto"' not in texto and '"ganancia"' not in texto, "historial.json publica dólares"
+assert _sin_nan((TMP / "web_data" / "hoy.json").read_text(encoding="utf-8"))["simulacion"] is True
+
+# el proyecto real quedó intacto
+assert CENTINELA.exists(), "la simulación borró datos/ del proyecto"
+CENTINELA.unlink()
+if _db_real_antes:
+    assert (_db_real.stat().st_mtime_ns, _db_real.stat().st_size) == _db_real_antes, "la simulación modificó la base real"
+assert {f: f.stat().st_mtime_ns for f in WEB_REAL.glob("*.json")} == _web_antes, "la simulación escribió en web/data real"
+print(f"\nOK simulación: {n_picks} picks, pesos 1X2 {({k: round(v, 2) for k, v in pesos_1x2.items()})}, "
+      f"{len(jsons)} JSON válidos, datos/ real intacto.")

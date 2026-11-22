@@ -93,9 +93,15 @@ def resultado(clave: str, r: dict) -> str | None:
     def gp(ok):
         return None if ok is None else ("ganada" if ok else "perdida")
 
+    def es_cuarto(ln):
+        """Línea de cuarto (.25/.75): media apuesta ganada/perdida; no se liquida automáticamente."""
+        return abs(ln * 2 - round(ln * 2)) > 1e-9
+
     def ou(valor, ln, lado):
-        if valor is None:
+        if valor is None or es_cuarto(ln):
             return None
+        if abs(valor - ln) < 1e-9:      # línea entera y empate exacto: devolución
+            return "nula"
         return gp(valor > ln if lado == "over" else valor < ln)
 
     if fam in ("1x2", "dc", "dnb", "btts", "ou", "tl", "tv", "ah") and (gl is None or gv is None):
@@ -117,6 +123,10 @@ def resultado(clave: str, r: dict) -> str | None:
         return ou(gv, float(p[1]), p[2])
     if fam == "ah":
         ln = float(p[1])
+        if es_cuarto(ln):
+            return None
+        if abs(gl + ln - gv) < 1e-9:    # línea entera y empate tras el hándicap: devolución
+            return "nula"
         return gp(gl + ln > gv if p[2] == "1" else gl + ln < gv)
     if fam == "ht1x2":
         htl, htv = r.get("htl"), r.get("htv")

@@ -6,14 +6,33 @@ Sudamérica, de hoy a +5 días) y entrega picks para apostar en **Ecuabet**
 (Ecuador). Se usa desde una **app web instalable (PWA)** en `web/`. El motor en
 Python corre en GitHub Actions y publica la web en GitHub Pages.
 
+**Perfil activo: plan GRATIS de API-Football** (100 consultas/día, 10/min): hoy +2 días, 11 ligas
+(LigaPro, Champions, Europa League, Premier, LaLiga, Serie A, Bundesliga, Ligue 1, Libertadores,
+Sudamericana, MLS) y pocas predicciones. El perfil completo (todas las ligas, +5 días) está
+documentado como `perfil_pro` en `config.yaml` y requiere un plan de pago.
+
+**Repositorio público sin dinero:** la banca, los montos y las ganancias en dólares NO se publican
+(`hoy.json` no trae banca; `historial.json` trae `u` = resultado en unidades de apuesta, solo de picks
+`registrado=1`). La banca vive en el navegador (localStorage) y en la variable `BANCA` (solo Telegram).
+La base SQLite NO está en `main` ni en claro en ningún lado: vive **CIFRADA** como `sistema.db.enc`
+(openssl AES-256-CBC, PBKDF2 200000, sal aleatoria) en la rama huérfana `datos`, junto con `web_data/`
+(JSON públicos). El secret `DB_KEY` la descifra al inicio de cada job y la cifra al final; si falta, el job
+falla. Si pierdes `DB_KEY` se pierde el historial. `web/data/*.json` está en `.gitignore` de `main`.
+
 El usuario está en Ecuador (zona horaria America/Guayaquil) y habla español.
 **Todo texto para el usuario va en español.**
 
 ## Tres niveles de picks
-- **Seguras:** simples con probabilidad ≥ 72% y cuota 1.25–1.60 (2% de la banca).
-- **Valor:** EV ≥ 4% contra la mejor cuota, con consenso entre fuentes (Kelly 1/4).
-- **Grandes:** combinadas para cobrar un objetivo ($50–$1000) con poco monto. El
-  algoritmo elige las piernas con mejor eficiencia `-log(p)/log(cuota)`, una por partido.
+- **Seguras:** simples con probabilidad ≥ 72% y cuota 1.25–1.60 (2% de la banca). Usan la
+  **cuota estimada de Ecuabet** (justa × 0.94, o la real si la anotaste), no una cuota verificada.
+- **Valor:** EV ≥ 4% contra la mejor cuota (Kelly 1/4, tope 3% por pick y 10% por día). El consenso
+  de **≥ 2 fuentes** se exige solo aquí. La IA ajusta la probabilidad pero **no cuenta como fuente**.
+- **Grandes:** combinadas con objetivo de **cobro total** `grandes_objetivos: [100, 200, 500]` y monto
+  `grandes_monto` (config.yaml); la cuota objetivo es objetivo/monto. (CLAUDE.md decía $50–$1000: era
+  el rango de la web; el motor usa la lista del config.) Lo público es la ganancia NETA
+  `monto*(cuota-1)` y `cobro_total` aparte. El algoritmo elige las piernas con mejor eficiencia
+  `-log(p)/log(cuota)`, una por partido.
+- Mercados de resultado: se liquidan a los **90 minutos** (tiempo reglamentario, sin prórroga/AET).
 
 ## Arquitectura
 ```
@@ -42,17 +61,34 @@ picks/
   regiones.py               país → Europa / Sudamérica / Norteamérica
 web/index.html              app (vanilla JS): Hoy (fechas, región, liga; Seguras/Valor/Grandes),
                             Partidos, Rendimiento, Fuentes, Ajustes. Registra apuestas con workflow_dispatch.
-.github/workflows/          diario (07:00 y 13:00 de Ecuador), registrar, backtest (domingos), verificar
+.github/workflows/          diario (07:00 y 13:00 de Ecuador), registrar (lote JSON), backtest (domingos), verificar.
+                            Grupos: `picks-datos` (diario+backtest) y `picks-registrar` (propio); los tres escriben la
+                            rama `datos` (base cifrada `sistema.db.enc`): descifrar->aplicar->cifrar->push se reintenta
+                            3 veces y reaplica sobre la versión remota. Permisos mínimos; el token solo en el último paso.
 tests/simulacion.py         simulación de punta a punta con fuentes falsas (sin internet)
 tests/ultimos30.py          prueba con DATOS REALES de los últimos 30 días (descarga football-data)
+tests/test_exportar.py      pytest: los JSON públicos no filtran banca/dólares y no tienen NaN
 ```
 
 ## Secrets (GitHub → Settings → Secrets → Actions)
-`API_FOOTBALL_KEY` (obligatoria), `APIFY_TOKEN`, `ODDS_API_KEY`, `GROQ_API_KEY`,
+`API_FOOTBALL_KEY` (obligatoria), `DB_KEY` (obligatoria: clave larga que cifra la base), `APIFY_TOKEN`, `ODDS_API_KEY`, `GROQ_API_KEY`,
 `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`. Variable opcional: `BANCA`.
 Nunca subas claves al repositorio.
 
+## Workflows: comportamiento a respetar
+- `registrar`: `registrar-lote` corre con `continue-on-error`; re-exportar, guardar y publicar corren siempre (si
+  se descifró bien) y un paso final deja el job en rojo si el lote tuvo errores (lo válido ya quedó guardado).
+- Un `204` de `workflow_dispatch` solo significa "encolado": la app debe esperar al workflow y no dar por guardada
+  la apuesta. GitHub conserva 1 run pendiente por grupo (por eso un único lote).
+- `diario` avisa con `::warning::` si `main.py hoy` imprime "sin datos: no se publica" (no cambies ese texto sin
+  ajustar el `grep` de diario.yml).
+- Si la rama `datos` trae un `sistema.db` en claro, los jobs se niegan a continuar (borrar y recrear la rama).
+- Pendiente: fijar por SHA las actions (`checkout`, `setup-python`, `cache`, `upload-pages-artifact`, `deploy-pages`).
+
 ## Resultados verificados (no inventar otros)
+Provienen de `tests/ultimos30.py` (backtest con cuotas de Bet365/Betfair), **no del tracker** de
+apuestas reales. El ROI real (`historial.json`) cuenta solo apuestas que el usuario registró; el ROI
+teórico del backtest no es una promesa de ganancia.
 - Prueba real del 23/10 al 21/11/2026, 154 partidos de las 5 grandes ligas:
   - El favorito acertó el 1X2 en el 58% de los partidos.
   - **Seguras:** ganaron 63 de 79 (80%), contra un 75% esperado. Neto +2,2%.
@@ -66,7 +102,8 @@ Nunca subas claves al repositorio.
   dinero o credenciales del usuario.
 - No hacer scraping masivo de sitios que limitan (Forebet devuelve 429). Usar las
   fuentes oficiales: API-Football y Apify para Forebet.
-- Tras cambiar código, correr `python tests/simulacion.py` (debe terminar sin errores).
+- Tras cambiar código, correr `python tests/simulacion.py` (usa un directorio temporal; no toca
+  `datos/` ni `web/data` reales) y `pytest tests/test_exportar.py`.
   Si hay internet, también `python tests/ultimos30.py`.
 - La UI es mobile-first. Revisarla a 390 px de ancho, en modo claro y oscuro.
 - Ser honesto: ningún sistema garantiza ganar. Mostrar siempre la probabilidad real

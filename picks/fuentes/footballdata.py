@@ -1,7 +1,6 @@
 """Histórico de football-data.co.uk (gratis): goles, medio tiempo, córners y tarjetas."""
 import io
 import time
-from datetime import date
 
 import pandas as pd
 import requests
@@ -13,7 +12,8 @@ COLS = ["fecha", "local", "visita", "gl", "gv", "htl", "htv", "cl", "cv", "tjl",
 
 
 def _temporadas(n: int = 2) -> list[str]:
-    hoy = date.today()
+    from ..pipeline import hoy_ec  # import tardío: evita ciclo
+    hoy = hoy_ec()
     ini = hoy.year if hoy.month >= 7 else hoy.year - 1
     return [f"{(ini - i) % 100:02d}{(ini - i + 1) % 100:02d}" for i in range(n)]
 

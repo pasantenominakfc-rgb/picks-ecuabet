@@ -1,5 +1,16 @@
 """Elige las apuestas del día: valor esperado + consenso entre fuentes + Kelly."""
+import math
+
 from . import mercados as M
+
+
+def contar_fuentes(detalle: dict) -> int:
+    """Fuentes independientes para el consenso: la IA no cuenta (solo ajusta p) y los dos modelos
+    estadísticos propios ('modelo' y 'penaltyblog', mismos datos de goles) cuentan como UNA."""
+    nombres = {k for k in detalle if k != "ia"}
+    if "modelo" in nombres and "penaltyblog" in nombres:
+        nombres.discard("penaltyblog")
+    return len(nombres)
 
 
 def kelly(p: float, cuota: float, p_push: float, cfg: dict) -> float:
@@ -27,13 +38,15 @@ def evaluar(partido: dict, cfg: dict) -> list[dict]:
         mejor, casa = partido["mejores"].get(k, (None, None))
         ref = ecuabet or mejor
         ev = M.valor_esperado(p, ref, p_push) if ref else None
-        acuerdo = (sum(1 for ps in info["detalle"].values() if ps * ref > 1) / info["n"]) if ref else None
-        conf = min(1.0, info["n"] / 3) * max(0.0, 1 - info["dispersion"] / (2 * cfg["max_dispersion"]))
+        n_ind = contar_fuentes(info["detalle"])
+        votos = [ps for f, ps in info["detalle"].items() if f != "ia"]
+        acuerdo = (sum(1 for ps in votos if ps * ref > 1) / max(1, len(votos))) if ref else None
+        conf = min(1.0, n_ind / 3) * max(0.0, 1 - info["dispersion"] / (2 * cfg["max_dispersion"]))
         out.append({"clave": k, "nombre": M.nombre(k, partido["local"], partido["visita"]),
                     "mercado": M.FAMILIAS[M.familia(k)], "p": p, "p_push": p_push,
                     "cuota_justa": justa, "cuota_minima": minima, "cuota_ecuabet": ecuabet,
                     "mejor_cuota": mejor, "mejor_casa": casa, "cuota_ref": ref, "ev": ev,
-                    "acuerdo": acuerdo, "confianza": conf, "n_fuentes": info["n"],
+                    "acuerdo": acuerdo, "confianza": conf, "n_fuentes": n_ind,
                     "dispersion": info["dispersion"], "detalle": info["detalle"], "pesos": info["pesos"],
                     "ia": (partido.get("ia") or {}).get(k)})
     return out
@@ -41,7 +54,8 @@ def evaluar(partido: dict, cfg: dict) -> list[dict]:
 
 def _pasa_basico(s: dict, cfg: dict) -> bool:
     return (cfg["cuota_min"] <= s["cuota_justa"] <= cfg["cuota_max"]
-            and s["n_fuentes"] >= cfg["min_fuentes"] and s["dispersion"] <= cfg["max_dispersion"])
+            and (contar_fuentes(s["detalle"]) if "detalle" in s else s["n_fuentes"]) >= cfg["min_fuentes"]
+            and s["dispersion"] <= cfg["max_dispersion"])
 
 
 def elegir(partidos: list[dict], cfg: dict) -> tuple[list[dict], list[dict]]:
@@ -51,7 +65,7 @@ def elegir(partidos: list[dict], cfg: dict) -> tuple[list[dict], list[dict]]:
         cands = evaluar(pa, cfg)
         pa["evaluadas"] = cands
         base = {k: pa.get(k) for k in ("uid", "liga", "region", "fecha", "inicio", "local", "visita", "af_id", "xg", "esperados")}
-        v = [s for s in cands if _pasa_basico(s, cfg) and s["ev"] is not None and (s["ia"] or {}).get("riesgo") != "alto"
+        v = [s for s in cands if _pasa_basico(s, cfg) and s["ev"] is not None and s["ev"] > 0 and (s["ia"] or {}).get("riesgo") != "alto"
              and s["ev"] >= cfg["ventaja_minima"] and s["acuerdo"] >= cfg["min_acuerdo"]]
         if v:
             mejor = max(v, key=lambda s: s["ev"] * s["confianza"])
@@ -71,9 +85,18 @@ def elegir(partidos: list[dict], cfg: dict) -> tuple[list[dict], list[dict]]:
         s["fraccion"] = kelly(s["p"], cuota, s["p_push"], cfg)
     tot = sum(s["fraccion"] for s in valor)
     escala = min(1.0, cfg["exposicion_dia_pct"] / tot) if tot else 1.0
+    tope_pick = cfg["stake_max_pct"] * banca
+    tope_dia = cfg["exposicion_dia_pct"] * banca
+    usado = 0.0
     for s in valor:
-        m = round(s["fraccion"] * escala * banca * 4) / 4
-        s["monto"] = max(m, cfg["stake_minimo"]) if m > 0 else 0.0
+        # floor a 0.25 (el redondeo al más cercano podía romper el tope diario: banca 100 -> 10.50 > 10)
+        m = math.floor(s["fraccion"] * escala * banca * 4 + 1e-9) / 4
+        if 0 < m < cfg["stake_minimo"]:
+            m = cfg["stake_minimo"]
+        if m > 0 and (m > tope_pick + 1e-9 or usado + m > tope_dia + 1e-9):
+            m = 0.0          # subir al mínimo no puede violar el tope por pick ni la exposición diaria: se omite
+        usado += m
+        s["monto"] = m
         s["ganancia_esperada"] = s["monto"] * M.valor_esperado(s["p"], s["cuota_calc"], s["p_push"])
     alta.sort(key=lambda s: s["p"], reverse=True)
     return [s for s in valor if s["monto"] > 0], alta[: cfg["max_alta_prob"]]

@@ -61,7 +61,7 @@ def _tarjeta(i, s, tipo):
     if tipo == "valor":
         estado = ("<span class='ok'>Cuota de Ecuabet confirmada</span>" if s.get("confirmado")
                   else f"<span class='warn'>Apostar solo si Ecuabet paga ≥ {s['cuota_minima']:.2f}</span>")
-        monto = f"${s['monto']:.2f}"
+        monto = "según tu banca"      # la banca no va en el HTML; se calcula abajo con la que guardes en el navegador
         meta = (f"Mejor cuota en el mercado: {_c(s['mejor_cuota'])} ({e(s['mejor_casa'] or '–')}) · "
                 f"valor {_pct(s['ev'])} · {s['acuerdo'] * 100:.0f}% de las fuentes ven valor")
     else:
@@ -122,19 +122,20 @@ def html_reporte(valor, alta, partidos, cfg, res, calib, creditos) -> str:
 
     hist = ""
     if res.get("n"):
-        pm = "".join(f"<tr><td>{e(k)}</td><td>{v['n']}</td><td>{(v['neto'] / v['apostado'] * 100 if v['apostado'] else 0):+.1f}%</td>"
-                     f"<td>{_usd(v['neto'])}</td></tr>" for k, v in sorted(res["por_mercado"].items()))
+        # el HTML no muestra dólares (neto/apostado): solo n y ROI. El Telegram privado sí muestra el neto.
+        pm = "".join(f"<tr><td>{e(k)}</td><td>{v['n']}</td><td>{(v['neto'] / v['apostado'] * 100 if v.get('apostado') else 0):+.1f}%</td></tr>"
+                     for k, v in sorted(res.get("por_mercado", {}).items()))
         hist = f"""<h2>Tu historial</h2><div class="card"><div class="grid">
-<div><b>{res['n']}</b><small>Apuestas</small></div><div><b>{res['acierto'] * 100:.0f}%</b><small>Acierto</small></div>
-<div><b>{res['roi'] * 100:+.1f}%</b><small>ROI</small></div><div><b>{_usd(res['neto'])}</b><small>Neto</small></div></div>
-<table><tr><th>Mercado</th><th>N</th><th>ROI</th><th>Neto</th></tr>{pm}</table>
+<div><b>{res['n']}</b><small>Apuestas</small></div><div><b>{(res.get('acierto') or 0) * 100:.0f}%</b><small>Acierto</small></div>
+<div><b>{(res.get('roi') or 0) * 100:+.1f}%</b><small>ROI</small></div></div>
+<table><tr><th>Mercado</th><th>N</th><th>ROI</th></tr>{pm}</table>
 <p class="meta">El ROI solo es confiable a partir de ~200 apuestas.</p></div>"""
 
     v_html = "".join(_tarjeta(i, s, "valor") for i, s in enumerate(valor, 1)) or \
         "<div class='card'><b>Hoy no hay apuestas de valor con consenso suficiente.</b><br>No apostar también es ganar.</div>"
     a_html = "".join(_tarjeta(i, s, "alta") for i, s in enumerate(alta, 1)) or \
         "<div class='card'>Sin selecciones de alta probabilidad hoy.</div>"
-    js_cfg = json.dumps({k: cfg[k] for k in ("banca", "fraccion_kelly", "stake_max_pct", "ventaja_minima")})
+    js_cfg = json.dumps({k: cfg[k] for k in ("fraccion_kelly", "stake_max_pct", "ventaja_minima")})
 
     return f"""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Picks {hoy}</title>
@@ -155,7 +156,7 @@ label{{display:block;margin-top:10px;font-size:13px}} input{{width:100%;box-sizi
 .calc{{margin-top:8px;font-weight:600}} table{{width:100%;border-collapse:collapse;font-size:12px}}
 td,th{{padding:6px 3px;border-bottom:1px solid #8883;text-align:center}} td:nth-child(2){{text-align:left}}
 </style></head><body><main>
-<h1>Picks del día</h1><div class="meta">{hoy} (Ecuador) · banca ${cfg['banca']:.2f} · valor mínimo {cfg['ventaja_minima'] * 100:.0f}% ·
+<h1>Picks del día</h1><div class="meta">{hoy} (Ecuador) · valor mínimo {cfg['ventaja_minima'] * 100:.0f}% ·
 mínimo {cfg['min_fuentes']} fuentes{(' · ' + e(creditos)) if creditos else ''}</div>
 <h2>Apuestas de valor</h2>{v_html}
 <h2>Alta probabilidad</h2><p class="meta">Mercados donde todas las fuentes coinciden, pero sin cuota de referencia
@@ -172,13 +173,13 @@ para medir el valor. Apuesta solo si Ecuabet paga al menos la cuota mínima.</p>
 <p class="meta">Probabilidades combinadas de todas las fuentes. AM = ambos marcan. Córn./Tarj. = promedio esperado. Fts = fuentes.</p></div>
 <p class="meta">Ningún sistema garantiza ganancias. Apuesta solo lo que puedas perder.</p>
 </main><script>
-const cfg={js_cfg};
+const cfg={js_cfg}; cfg.banca=parseFloat(localStorage.getItem('banca'))||0;   // la banca solo vive en tu navegador
 document.querySelectorAll('.card[data-p]').forEach(c=>{{
  const p=+c.dataset.p, pp=+c.dataset.push, inp=c.querySelector('input'), out=c.querySelector('.calc');
  const f=()=>{{const o=parseFloat(inp.value); if(!o){{out.textContent='';return}}
   const ev=(1-pp)*(p*o-1), k=Math.max(0,Math.min((1-pp)*(p*o-1)/(o-1)*cfg.fraccion_kelly,cfg.stake_max_pct));
-  const m=Math.max(1,Math.round(k*cfg.banca*4)/4);
-  if(ev>=cfg.ventaja_minima){{out.style.color='var(--ok)';out.textContent=`✔ Valor ${{(ev*100).toFixed(1)}}% → apostar $${{m.toFixed(2)}}`}}
+  const m=Math.max(1,Math.round(k*cfg.banca*4)/4), txt=cfg.banca?`$${{m.toFixed(2)}}`:`${{(k*100).toFixed(1)}}% de tu banca`;
+  if(ev>=cfg.ventaja_minima){{out.style.color='var(--ok)';out.textContent=`✔ Valor ${{(ev*100).toFixed(1)}}% → apostar ${{txt}}`}}
   else{{out.style.color='var(--bad)';out.textContent=`✘ Valor ${{(ev*100).toFixed(1)}}% → no apostar`}}}};
  inp.addEventListener('input',f); f();}});
 </script></body></html>"""
@@ -201,7 +202,7 @@ def texto_niveles(seguras, grandes) -> str:
         L += [f"• {s['local']} vs {s['visita']}: {s['nombre']} ({_pct(s['p'])}, cuota ~{s['cuota_est']:.2f})"
               + (" ⚠️" if (s.get('ia') or {}).get('riesgo') == 'medio' else "") for s in seguras]
     for c in grandes:
-        L += ["", f"🚀 Combinada para ganar ${c['ganancia']:.0f} con ${c['monto']:.0f} (cuota {c['cuota']:.1f}, "
+        L += ["", f"🚀 Combinada: ganancia neta ${c['ganancia'] - c['monto']:.0f} (cobras ${c['ganancia']:.0f}) con ${c['monto']:.0f} (cuota {c['cuota']:.1f}, "
                   f"prob. real {c['p'] * 100:.1f}% ≈ 1 de cada {max(1, round(1 / c['p']))})"]
         L += [f"   - {s['local']} vs {s['visita']}: {s['nombre']} ({_pct(s['p'])})" for s in c["piernas"]]
     return "\n".join(L)

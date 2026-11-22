@@ -1,26 +1,112 @@
 # Analiza y publica la web: 07:00 y 13:00 de Ecuador (12:00 y 18:00 UTC).
+# La base SQLite (montos y ganancias reales) vive CIFRADA (sistema.db.enc) en la rama huérfana `datos`;
+# el secret DB_KEY la descifra al inicio y la vuelve a cifrar al final. Diario y backtest comparten el grupo
+# `picks-datos`; registrar tiene el suyo (`picks-registrar`) y el paso de guardado se reintenta si choca.
+# TODO fijar por SHA (sin internet no se pudo resolver): checkout, setup-python, cache,
+# upload-pages-artifact, deploy-pages.
 name: Picks diarios
 on:
   schedule:
     - cron: "0 12 * * *"
     - cron: "0 18 * * *"
   workflow_dispatch: {}
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 concurrency:
-  group: picks
+  group: picks-datos
   cancel-in-progress: false
 jobs:
   analizar:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write     # push de sistema.db.enc y web_data/ a la rama `datos`
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Verificar que existe el secret DB_KEY
+        env:
+          DB_KEY: ${{ secrets.DB_KEY }}
+        run: |
+          if [ -z "${DB_KEY:-}" ]; then
+            echo "::error title=Falta DB_KEY::No existe el secret DB_KEY. La base se guarda CIFRADA en la rama datos y sin esa clave no se sube nada en claro. Crea el secret (Settings > Secrets and variables > Actions) siguiendo la sección 'Cifrado de la base' del README."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4                # TODO fijar por SHA
+        with: {persist-credentials: false}
+      - name: Asegurar que existe la rama datos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$B64"
+          AUTH="AUTHORIZATION: basic $B64"
+          rc=0
+          # código 0 = existe; 2 = no existe; cualquier otro (red, permisos) = error real: se detiene el job
+          git -c http.extraheader="$AUTH" ls-remote --exit-code origin refs/heads/datos >/dev/null || rc=$?
+          case "$rc" in
+            0) echo "La rama datos existe." ;;
+            2)
+              echo "La rama datos no existe: se crea vacía (la base irá cifrada como sistema.db.enc)."
+              tmp="$(mktemp -d)"; cd "$tmp"
+              git init -q; git checkout -q --orphan datos
+              git config user.name "picks-bot"; git config user.email "picks-bot@users.noreply.github.com"
+              # la base en claro nunca debe poder subirse por accidente
+              printf '*.db\n*.db-journal\n*.db-wal\n*.db-shm\n' > .gitignore
+              git add .gitignore
+              git commit -q -m "Rama datos (vacía; la base se guarda cifrada)"
+              git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+              git -c http.extraheader="$AUTH" push -q origin datos
+              ;;
+            *)
+              echo "::error::No se pudo consultar la rama datos (git ls-remote devolvió $rc: red o permisos). No se continúa para no recrearla por error."
+              exit 1
+              ;;
+          esac
+      - name: Traer la rama datos
+        uses: actions/checkout@v4                # TODO fijar por SHA
+        with:
+          ref: datos
+          path: datos
+          persist-credentials: false             # el token NO queda en datos/.git/config mientras corren paquetes de terceros
+      - name: Descifrar la base
+        id: descifrar
+        env:
+          DB_KEY: ${{ secrets.DB_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -f datos/sistema.db ]; then
+            echo "::error title=Base en claro en la rama datos::La rama datos contiene un sistema.db SIN cifrar (se publicó alguna vez). No se reutiliza. Bórrala y recréala (ver 'Cifrado de la base' en el README); antes, si quieres conservar el historial, cífralo tú con la misma DB_KEY."
+            exit 1
+          fi
+          if [ -f datos/sistema.db.enc ]; then
+            if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:DB_KEY \
+                 -in datos/sistema.db.enc -out datos/sistema.db; then
+              rm -f datos/sistema.db
+              echo "::error title=No se pudo descifrar::DB_KEY no coincide con la que cifró sistema.db.enc (o el archivo está dañado). No se guarda nada."
+              exit 1
+            fi
+          else
+            echo "Aún no hay sistema.db.enc: se empieza con una base nueva."
+          fi
+      - name: Preparar
+        run: |
+          set -euo pipefail
+          echo "BASE_SHA=$(git -C datos rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "DIA=$(date -u +%F)" >> "$GITHUB_ENV"
+          mkdir -p datos/cache web/data
+          # JSON públicos de la corrida anterior (la web los necesita completos aunque este run solo cambie algunos)
+          if [ -d datos/web_data ]; then cp -r datos/web_data/. web/data/; fi
+      - uses: actions/cache@v4                   # TODO fijar por SHA
+        with:
+          path: datos/cache
+          key: picks-cache-${{ env.DIA }}-${{ github.run_id }}
+          restore-keys: |
+            picks-cache-${{ env.DIA }}-
+            picks-cache-
+      - uses: actions/setup-python@v5            # TODO fijar por SHA
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
       - name: Analizar partidos
+        id: hoy
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
@@ -29,19 +115,129 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BANCA: ${{ vars.BANCA }}
-        run: python main.py hoy
-      - name: Guardar datos
         run: |
-          git config user.name "picks-bot"
-          git config user.email "picks-bot@users.noreply.github.com"
-          for p in reportes web/data datos/sistema.db; do [ -e "$p" ] && git add -A "$p"; done; true
-          git commit -m "Picks $(date -u +%F_%H)" || echo "Sin cambios"
-          git pull --rebase --autostash && git push
-      - uses: actions/upload-pages-artifact@v3
+          set -euo pipefail
+          # el log se conserva para detectar el caso "sin datos" (main.py sale con 0 pero no publica nada)
+          python main.py hoy 2>&1 | tee "$RUNNER_TEMP/hoy.log"
+      - name: Avisar si no hubo datos
+        if: always() && steps.hoy.outcome != 'skipped'
+        run: |
+          if grep -qF "sin datos: no se publica" "$RUNNER_TEMP/hoy.log" 2>/dev/null; then
+            echo "::warning title=Sin datos hoy::main.py hoy no encontró partidos o las fuentes fallaron (¿cuota de la API agotada?). La web conserva lo publicado antes: revisa el log del paso 'Analizar partidos'."
+            echo "### Aviso: sin datos hoy. No se actualizaron los picks." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Cifrar y guardar en la rama datos
+        id: guardar
+        env:
+          DB_KEY: ${{ secrets.DB_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${DB_KEY:?Falta el secret DB_KEY}"
+          B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$B64"
+          AUTH="AUTHORIZATION: basic $B64"          # solo existe en este paso (el último), no en datos/.git/config
+          LOCAL="$RUNNER_TEMP/sistema.db"           # copia en claro FUERA de la rama: nunca llega a un commit
+          REMOTO="$RUNNER_TEMP/remoto.db"
+          git -C datos config user.name "picks-bot"
+          git -C datos config user.email "picks-bot@users.noreply.github.com"
+          # los pasos de Python no necesitan ni deben ver DB_KEY ni el token
+          sin_secretos() { env -u DB_KEY -u GH_TOKEN "$@"; }
+          cifrar() {   # $1 = base en claro, $2 = salida (sal aleatoria por defecto)
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:DB_KEY -in "$1" -out "$2"
+          }
+          descifrar() {   # $1 = .enc, $2 = salida
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:DB_KEY -in "$1" -out "$2"
+          }
+          exportar_historial() {   # regenera historial.json desde la base que esté en datos/sistema.db
+            [ -f "$LOCAL" ] || return 0
+            cp "$LOCAL" datos/sistema.db
+            sin_secretos python -c "from picks import exportar; exportar.historial()"
+            rm -f datos/sistema.db
+          }
+
+          if [ -f datos/sistema.db ]; then mv datos/sistema.db "$LOCAL"; fi
+
+          HAY=0
+          empaquetar() {   # copia JSON, cifra y verifica, deja UN commit listo (HAY=1) o nada que subir (HAY=0)
+            HAY=0
+            rm -rf datos/web_data && mkdir -p datos/web_data && cp -r web/data/. datos/web_data/
+            if [ -f "$LOCAL" ]; then
+              cifrar "$LOCAL" datos/sistema.db.enc || { echo "::error::Falló el cifrado; no se sube nada."; exit 1; }
+              # comprobación: lo cifrado debe descifrar a la misma base; si no, abortar antes de subir nada
+              if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:DB_KEY -in datos/sistema.db.enc | cmp -s - "$LOCAL"; then
+                echo "::error::La verificación del cifrado falló; no se sube nada."; exit 1
+              fi
+              git -C datos add sistema.db.enc
+            fi
+            if [ ! -f datos/.gitignore ]; then printf '*.db\n*.db-journal\n*.db-wal\n*.db-shm\n' > datos/.gitignore; fi
+            git -C datos add .gitignore web_data
+            # red de seguridad: jamás un .db en claro en el índice
+            if git -C datos diff --cached --name-only | grep -Eq '\.db(-journal|-wal|-shm)?$'; then
+              echo "::error::Un .db en claro iba a subirse; se aborta."; exit 1
+            fi
+            if git -C datos diff --cached --quiet; then return 0; fi
+            git -C datos commit -q -m "Picks $(date -u +%F_%H%M)" || { echo "::error::git commit falló."; exit 1; }
+            HAY=1
+          }
+
+          # ---- Sección crítica: cifrar -> commit -> push, con reintentos. Diario, registrar y backtest escriben la
+          # misma rama y NO comparten grupo de concurrency entre todos, así que el push puede ser rechazado si otro
+          # job la movió. La base cifrada es binaria (no se fusiona con git): ante un rechazo se baja la versión
+          # remota, se descifra y se REAPLICA nuestro cambio sobre ella, y se vuelve a intentar (máx. 3 veces).
+          for i in 1 2 3; do
+            empaquetar
+            if [ "$HAY" = 0 ]; then echo "Sin cambios que guardar."; exit 0; fi
+            if git -C datos -c http.extraheader="$AUTH" push -q origin HEAD:datos; then
+              echo "Guardado en la rama datos (intento $i)."; exit 0
+            fi
+            echo "::warning::Push rechazado (intento $i): la rama datos avanzó. Se baja la versión remota y se reaplica el cambio."
+            [ "$i" -lt 3 ] || break
+            git -C datos -c http.extraheader="$AUTH" fetch -q origin datos
+            git -C datos reset -q --hard FETCH_HEAD     # descarta nuestro commit; la base en claro está fuera de la rama
+            if [ -f datos/sistema.db.enc ]; then
+              descifrar datos/sistema.db.enc "$REMOTO" || { echo "::error::No se pudo descifrar la versión remota."; exit 1; }
+            else
+              rm -f "$REMOTO"
+            fi
+            # Diario/backtest: nuestra base es la buena (picks nuevos, resultados, predicciones). De la remota solo se
+            # traen las acciones del usuario hechas mientras corríamos (apuestas registradas / "No aposté").
+            # Límite conocido: si el pick ya se liquidó aquí sin estar registrado, se recalcula su ganancia con lo registrado.
+            if [ -f "$REMOTO" ] && [ -f "$LOCAL" ]; then
+              sin_secretos python - "$LOCAL" "$REMOTO" <<'PY'
+          import sqlite3, sys
+          con = sqlite3.connect(sys.argv[1])
+          con.execute("ATTACH DATABASE ? AS r", (sys.argv[2],))
+          n1 = con.execute('''UPDATE picks SET cuota_tomada = x.cuota_tomada, monto = x.monto, registrado = 1,
+              ganancia = CASE WHEN picks.estado = 'ganada' THEN round(x.monto * (x.cuota_tomada - 1), 2)
+                              WHEN picks.estado = 'perdida' THEN -x.monto WHEN picks.estado = 'nula' THEN 0.0
+                              ELSE x.ganancia END,
+              estado = CASE WHEN picks.estado = 'no_apostada' THEN 'pendiente' ELSE picks.estado END
+            FROM r.picks AS x
+            WHERE x.uid = picks.uid AND x.clave = picks.clave AND x.registrado = 1 AND picks.registrado = 0''').rowcount
+          n2 = con.execute('''UPDATE picks SET estado = 'no_apostada'
+            FROM r.picks AS x
+            WHERE x.uid = picks.uid AND x.clave = picks.clave AND x.estado = 'no_apostada'
+              AND picks.estado = 'pendiente' AND picks.registrado = 0''').rowcount
+          con.commit()
+          print(f"Fusión: {n1} apuestas registradas y {n2} omitidas traídas de la versión remota.")
+          PY
+            fi
+            exportar_historial
+          done
+          # Último recurso: --force-with-lease con el SHA que vimos al empezar solo pisa la rama si NADIE la movió
+          # desde entonces. Si la rama avanzó (el caso que nos trajo aquí) falla y el job queda rojo, sin perder datos ajenos.
+          git -C datos -c http.extraheader="$AUTH" push --force-with-lease="datos:${BASE_SHA}" origin HEAD:datos \
+            || { echo "::error::No se pudo guardar en la rama datos tras 3 intentos. Reintenta el workflow."; exit 1; }
+      - uses: actions/upload-pages-artifact@v3   # TODO fijar por SHA
         with: {path: web}
+
   publicar:
     needs: analizar
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment: {name: github-pages}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4            # TODO fijar por SHA

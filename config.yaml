@@ -6,7 +6,20 @@
 #   ODDS_API_KEY      -> https://the-odds-api.com (opcional; cuotas de Pinnacle/Betfair)
 #   APIFY_TOKEN       -> https://console.apify.com (opcional; predicciones de Forebet)
 
-# --- Tu banca --------------------------------------------------------------
+# --- Perfil activo -----------------------------------------------------------
+# PERFIL GRATIS (activo): API-Football gratis = 100 consultas/día y 10 por minuto. El perfil completo
+# (todas las ligas, +5 días, 40 predicciones/día) gasta más de lo que ese plan permite y deja el
+# análisis a medias con la cuota agotada; por eso aquí hay pocas ligas, 2 días y pocas predicciones.
+# PERFIL PRO (plan de pago de API-Football, 7 500/día): ver el bloque `perfil_pro` más abajo.
+# Ojo: config.py todavía NO aplica `perfil_pro` solo; para activarlo cambia a mano los valores
+# indicados en ese bloque (o añade en config.py: si perfil == "pro", cfg.update(cfg["perfil_pro"])).
+perfil: gratis
+af_plan: gratis               # gratis | pro
+af_max_por_minuto: 10         # tope del plan gratis (el cliente de API-Football espera entre llamadas)
+
+# --- Tu banca (privado) -----------------------------------------------------
+# El repositorio es público: la banca real va en la variable BANCA de GitHub o en tu navegador, NO aquí.
+# Este valor es solo un ejemplo para pruebas locales; no se publica en web/data.
 banca: 100.0
 fraccion_kelly: 0.25
 stake_max_pct: 0.03
@@ -44,8 +57,13 @@ seguras_prob_min: 0.72        # probabilidad mínima de una "segura"
 seguras_cuota_min: 1.25
 seguras_cuota_max: 1.60
 seguras_stake_pct: 0.02       # 2% de la banca por segura
+seguras_exposicion_dia_pct: 0.06  # tope diario de las seguras (6% de la banca); entran primero las de mayor probabilidad
 max_seguras: 8
-grandes_objetivos: [100, 200, 500]   # ganancia objetivo de las combinadas
+# Objetivos de las combinadas "grandes", en DÓLARES DE COBRO TOTAL (incluye lo apostado): la cuota objetivo
+# es objetivo / grandes_monto (100/5 = cuota 20). CLAUDE.md hablaba de $50–$1000: eso era el rango que
+# la web puede ofrecer; el motor solo calcula los de esta lista. Para otros objetivos edítala.
+# La ganancia NETA que se publica es monto*(cuota-1); el cobro total va aparte (cobro_total).
+grandes_objetivos: [100, 200, 500]
 grandes_monto: 5.0            # monto por combinada
 grandes_prob_min_pierna: 0.55
 grandes_max_piernas: 8
@@ -73,32 +91,41 @@ stats_calibracion_dia: 8  # partidos/día a los que se les bajan córners/tarjet
 casas_afiladas: [pinnacle, betfair, betfair_ex_eu, betfairexchange, matchbook]
 casa_objetivo: ecuabet
 forebet_linea_tarjetas: 4.5   # línea que usa Forebet en su pronóstico de tarjetas (verificar)
-max_predicciones_af: 40       # consultas /predictions por día (plan gratis: cuida el límite de 100)
+max_predicciones_af: 10       # consultas /predictions por día (plan gratis: 100 en total; perfil pro: 40)
 
 # --- Fechas -------------------------------------------------------------------
-dias_adelante: 5              # analiza hoy + 5 días (en la app eliges la fecha)
+dias_adelante: 2              # perfil gratis: hoy + 2 días (perfil pro: 5)
 max_picks_dia: 8              # por cada día
 
 # --- Ligas ------------------------------------------------------------------
 # Modo "todas": además de la lista, analiza CUALQUIER liga que API-Football tenga
 # para esas fechas en los países/regiones de abajo (fuentes: cuotas + Forebet + IA).
-incluir_todas_las_ligas: true
+incluir_todas_las_ligas: false   # perfil gratis: solo la lista de abajo (perfil pro: true)
 regiones_todas: [Europa, Sudamérica, Norteamérica]
 # Con muchas ligas se usan más consultas: el plan Pro de API-Football (7 500/día) es lo recomendado.
 
 # af: id en API-Football (verifica con: python main.py verificar) | odds_key: The Odds API |
 # fd: football-data (histórico con córners/tarjetas para los modelos propios)
-ligas:
-  # ---------------- Europa ----------------
+ligas:        # PERFIL GRATIS: solo estas 11 (ids de API-Football ya verificados en este archivo)
   - {nombre: Premier League,     region: Europa, af: 39,  odds_key: soccer_epl,                        fd: E0,  tipo: main}
-  - {nombre: Championship,       region: Europa, af: 40,  odds_key: soccer_efl_champ,                  fd: E1,  tipo: main}
   - {nombre: LaLiga,             region: Europa, af: 140, odds_key: soccer_spain_la_liga,              fd: SP1, tipo: main}
-  - {nombre: LaLiga 2,           region: Europa, af: 141, odds_key: soccer_spain_segunda_division,     fd: SP2, tipo: main}
   - {nombre: Serie A,            region: Europa, af: 135, odds_key: soccer_italy_serie_a,              fd: I1,  tipo: main}
-  - {nombre: Serie B,            region: Europa, af: 136, odds_key: soccer_italy_serie_b,              fd: I2,  tipo: main}
   - {nombre: Bundesliga,         region: Europa, af: 78,  odds_key: soccer_germany_bundesliga,         fd: D1,  tipo: main}
-  - {nombre: 2. Bundesliga,      region: Europa, af: 79,  odds_key: soccer_germany_bundesliga2,        fd: D2,  tipo: main}
   - {nombre: Ligue 1,            region: Europa, af: 61,  odds_key: soccer_france_ligue_one,           fd: F1,  tipo: main}
+  - {nombre: Champions League,   region: Europa, af: 2,   odds_key: soccer_uefa_champs_league}
+  - {nombre: Europa League,      region: Europa, af: 3,   odds_key: soccer_uefa_europa_league}
+  - {nombre: MLS,                region: Norteamérica, af: 253, odds_key: soccer_usa_mls,            fd: USA, tipo: extra}
+  - {nombre: LigaPro Ecuador,    region: Sudamérica, af: 242}
+  - {nombre: Libertadores,       region: Sudamérica, af: 13,  odds_key: soccer_conmebol_copa_libertadores}
+  - {nombre: Sudamericana,       region: Sudamérica, af: 11,  odds_key: soccer_conmebol_copa_sudamericana}
+
+# Ligas del perfil PRO: no se analizan con el perfil gratis. Para activarlas, pasa estas líneas
+# a la lista `ligas:` de arriba (junto con los valores de `perfil_pro`).
+ligas_extra:
+  - {nombre: Championship,       region: Europa, af: 40,  odds_key: soccer_efl_champ,                  fd: E1,  tipo: main}
+  - {nombre: LaLiga 2,           region: Europa, af: 141, odds_key: soccer_spain_segunda_division,     fd: SP2, tipo: main}
+  - {nombre: Serie B,            region: Europa, af: 136, odds_key: soccer_italy_serie_b,              fd: I2,  tipo: main}
+  - {nombre: 2. Bundesliga,      region: Europa, af: 79,  odds_key: soccer_germany_bundesliga2,        fd: D2,  tipo: main}
   - {nombre: Ligue 2,            region: Europa, af: 62,  odds_key: soccer_france_ligue_two,           fd: F2,  tipo: main}
   - {nombre: Eredivisie,         region: Europa, af: 88,  odds_key: soccer_netherlands_eredivisie,     fd: N1,  tipo: main}
   - {nombre: Primeira Liga,      region: Europa, af: 94,  odds_key: soccer_portugal_primeira_liga,     fd: P1,  tipo: main}
@@ -112,15 +139,9 @@ ligas:
   - {nombre: Eliteserien Noruega, region: Europa, af: 103, odds_key: soccer_norway_eliteserien,        fd: NOR, tipo: extra}
   - {nombre: Allsvenskan Suecia, region: Europa, af: 113, odds_key: soccer_sweden_allsvenskan,         fd: SWE, tipo: extra}
   - {nombre: Ekstraklasa Polonia, region: Europa, af: 106, odds_key: soccer_poland_ekstraklasa,        fd: POL, tipo: extra}
-  - {nombre: Champions League,   region: Europa, af: 2,   odds_key: soccer_uefa_champs_league}
-  - {nombre: Europa League,      region: Europa, af: 3,   odds_key: soccer_uefa_europa_league}
   - {nombre: Conference League,  region: Europa, af: 848, odds_key: soccer_uefa_europa_conference_league}
-  # ---------------- Norte y Centroamérica ----------------
-  - {nombre: MLS,                region: Norteamérica, af: 253, odds_key: soccer_usa_mls,            fd: USA, tipo: extra}
   - {nombre: Liga MX,            region: Norteamérica, af: 262, odds_key: soccer_mexico_ligamx,      fd: MEX, tipo: extra}
   - {nombre: Concacaf Champions, region: Norteamérica, af: 16}
-  # ---------------- Sudamérica ----------------
-  - {nombre: LigaPro Ecuador,    region: Sudamérica, af: 242}
   - {nombre: Brasileirão,        region: Sudamérica, af: 71,  odds_key: soccer_brazil_campeonato,          fd: BRA, tipo: extra}
   - {nombre: Brasil Serie B,     region: Sudamérica, af: 72,  odds_key: soccer_brazil_serie_b}
   - {nombre: Liga Argentina,     region: Sudamérica, af: 128, odds_key: soccer_argentina_primera_division, fd: ARG, tipo: extra}
@@ -131,5 +152,14 @@ ligas:
   - {nombre: Primera Paraguay,   region: Sudamérica, af: 250}
   - {nombre: Primera Bolivia,    region: Sudamérica, af: 344}
   - {nombre: Primera Venezuela,  region: Sudamérica, af: 299}
-  - {nombre: Libertadores,       region: Sudamérica, af: 13,  odds_key: soccer_conmebol_copa_libertadores}
-  - {nombre: Sudamericana,       region: Sudamérica, af: 11,  odds_key: soccer_conmebol_copa_sudamericana}
+
+# --- Perfil PRO (documentado; plan de pago de API-Football) ------------------------
+# Valores a poner arriba para analizarlo todo (hoy +5 días, todas las ligas):
+perfil_pro:
+  perfil: pro
+  af_plan: pro
+  af_max_por_minuto: 300
+  dias_adelante: 5
+  incluir_todas_las_ligas: true
+  max_predicciones_af: 40
+  ligas: "ligas + ligas_extra"

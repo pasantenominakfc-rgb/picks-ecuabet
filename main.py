@@ -8,10 +8,12 @@ Uso:
   python main.py pendientes              picks pendientes con su ID
   python main.py registrar ID CUOTA [MONTO]   anota la cuota que tomaste en Ecuabet
   python main.py omitir ID               marca un pick como no apostado
+  python main.py registrar-lote          registra/omite varios picks (JSON en la variable de entorno LOTE)
   python main.py ligas                   ids de ligas en API-Football (para config.yaml)
   python main.py backtest               prueba la estrategia en la última temporada
   python main.py verificar              revisa claves, créditos y ligas (puesta en marcha)
 """
+import json
 import os
 import sys
 
@@ -48,6 +50,10 @@ def hoy(cfg):
     if n:
         print(f"✓ {n} picks liquidados")
     partidos = pipeline.analizar(cfg, af, odds, fb)
+    if not partidos:
+        print("⚠ sin datos: no se publica (¿cuota de API agotada o fallo de las fuentes?). "
+              "Se conserva lo ya publicado en web/data.")
+        return
     dias = pipeline.picks_por_dia(partidos, cfg)
     ia = AnalistaIA(cfg["groq_api_key"], cfg.get("ia_modelo", "groq/compound"), cfg.get("ia_max_consultas", 15))
     if ia.activa and dias:
@@ -67,7 +73,9 @@ def hoy(cfg):
     d0 = dias.get(hoy_f, {"valor": [], "alta": [], "seguras": [], "grandes": []})
     del_hoy = [p for p in partidos if p["fecha"] == hoy_f]
     h, t = report.guardar(d0["valor"], d0["alta"], del_hoy, cfg, res, calib, creditos)
-    exportar.hoy(partidos, dias, cfg, creditos)
+    info = getattr(partidos, "info", None) or {}
+    estado = {**info, "cuota_agotada": bool(info.get("cuota_agotada") or getattr(af, "sin_cuota", False))}
+    exportar.hoy(partidos, dias, cfg, creditos, estado=estado)
     exportar.historial()
     exportar.fuentes(cfg)
     msg = t.read_text(encoding="utf-8") + report.texto_niveles(d0["seguras"], d0["grandes"])
@@ -80,6 +88,15 @@ def hoy(cfg):
     telegram(msg)
 
 
+def _http(url, **kw):
+    """GET que nunca lanza: devuelve (ok, detalle)."""
+    try:
+        r = requests.get(url, timeout=20, **kw)
+        return r.ok, r.status_code
+    except requests.RequestException as ex:
+        return False, type(ex).__name__
+
+
 def verificar(cfg):
     ok = True
     print("Verificando la puesta en marcha...\n")
@@ -87,41 +104,106 @@ def verificar(cfg):
         print("✘ Falta API_FOOTBALL_KEY (obligatoria)")
         return False
     af = APIFootball(cfg["api_football_key"])
-    st = af._get("/status")
-    cuenta = (st.get("response") or {}) if isinstance(st.get("response"), dict) else {}
-    if cuenta.get("requests"):
-        r = cuenta["requests"]
-        print(f"✔ API-Football: plan {cuenta.get('subscription', {}).get('plan')} · {r['current']}/{r['limit_day']} consultas hoy")
-    else:
-        print(f"✘ API-Football no respondió bien: {st.get('errors')}")
-        ok = False
-    ligas = {l["league"]["id"]: (l["country"]["name"], l["league"]["name"])
-             for l in af._get("/leagues", cache_horas=24, current="true").get("response", [])}
+    try:
+        st = af._get("/status")
+        cuenta = (st.get("response") or {}) if isinstance(st.get("response"), dict) else {}
+        if cuenta.get("requests"):
+            r = cuenta["requests"]
+            print(f"✔ API-Football: plan {cuenta.get('subscription', {}).get('plan')} · {r['current']}/{r['limit_day']} consultas hoy")
+        else:
+            print(f"✘ API-Football no respondió bien: {st.get('errors')}")
+            ok = False
+        ligas = {l["league"]["id"]: (l["country"]["name"], l["league"]["name"])
+                 for l in af._get("/leagues", cache_horas=24, current="true").get("response", [])}
+    except Exception as ex:  # noqa: BLE001
+        print(f"✘ API-Football falló: {type(ex).__name__}: {ex}")
+        return False
     for lg in cfg["ligas"]:
         real = ligas.get(lg.get("af"))
         marca = "✔" if real else "✘"
         print(f"  {marca} {lg['nombre']:18s} id {lg.get('af')} → {real[0] + ' / ' + real[1] if real else 'NO ENCONTRADA (revisa con: python main.py ligas)'}")
         ok &= bool(real)
     if cfg["odds_api_key"]:
-        o = OddsAPI(cfg["odds_api_key"])
-        o.deportes()
-        print(f"✔ The Odds API: {o.restantes} créditos restantes" if o.restantes else "✘ The Odds API: clave inválida")
+        try:
+            o = OddsAPI(cfg["odds_api_key"])
+            o.deportes()
+            bien = bool(o.restantes)
+        except Exception:  # noqa: BLE001
+            bien = False
+        print(f"✔ The Odds API: {o.restantes} créditos restantes" if bien else "✘ The Odds API: clave inválida")
+        ok &= bien
     else:
         print("· The Odds API: sin clave (opcional)")
     if cfg["apify_token"]:
-        r = requests.get("https://api.apify.com/v2/users/me", params={"token": cfg["apify_token"]}, timeout=20)
-        print("✔ Apify (Forebet): token válido" if r.ok else f"✘ Apify: token inválido ({r.status_code})")
-        ok &= r.ok
+        bien, det = _http("https://api.apify.com/v2/users/me", params={"token": cfg["apify_token"]})
+        print("✔ Apify (Forebet): token válido" if bien else f"✘ Apify: token inválido ({det})")
+        ok &= bien
     else:
         print("· Apify/Forebet: sin token (opcional, recomendado)")
     if cfg["groq_api_key"]:
-        r = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {cfg['groq_api_key']}"}, timeout=20)
-        print("✔ Groq (IA): clave válida" if r.ok else f"✘ Groq: clave inválida ({r.status_code})")
+        bien, det = _http("https://api.groq.com/openai/v1/models",
+                          headers={"Authorization": f"Bearer {cfg['groq_api_key']}"})
+        print("✔ Groq (IA): clave válida" if bien else f"✘ Groq: clave inválida ({det})")
+        ok &= bien
     else:
         print("· Groq (IA): sin clave (opcional, recomendado)")
-    print("✔ Telegram configurado" if os.environ.get("TELEGRAM_TOKEN") else "· Telegram: sin configurar (opcional)")
+    token, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if token and not chat:
+        print("✘ Telegram: hay TELEGRAM_TOKEN pero falta TELEGRAM_CHAT_ID")
+        ok = False
+    elif token:
+        bien, det = _http(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat})
+        print("✔ Telegram configurado (token y chat válidos)" if bien else f"✘ Telegram: token o chat inválido ({det})")
+        ok &= bien
+    else:
+        print("· Telegram: sin configurar (opcional)")
     print("\n" + ("Todo listo ✅" if ok else "Hay cosas por corregir ⚠️"))
-    return ok
+    return bool(ok)
+
+
+MAX_LOTE = 50
+
+
+def _s(x, n: int) -> str:
+    """Texto seguro para logs: ascii() escapa saltos de línea y caracteres de control (sin inyección)."""
+    return ascii(str(x)[:n])
+
+
+def registrar_lote(raw: str) -> int:
+    """Procesa un lote JSON [{uid, clave, accion: registrar|omitir, cuota, monto}]. Devuelve el código de
+    salida: 0 solo si TODOS los ítems se aplicaron. No exporta (lo hace el comando)."""
+    try:
+        items = json.loads(raw or "")
+    except ValueError:
+        print("✘ LOTE no es un JSON válido")
+        return 1
+    if not isinstance(items, list) or not items:
+        print("✘ LOTE debe ser una lista no vacía")
+        return 1
+    if len(items) > MAX_LOTE:
+        print(f"✘ LOTE tiene {len(items)} ítems (máximo {MAX_LOTE}); no se procesó nada")
+        return 1
+    fallos = 0
+    for i, it in enumerate(items, 1):
+        if not isinstance(it, dict):
+            print(f"✘ #{i}: ítem no es un objeto")
+            fallos += 1
+            continue
+        uid, clave, accion = it.get("uid"), it.get("clave"), it.get("accion")
+        if accion == "registrar":
+            motivo = tracker.registrar_web_motivo(uid, clave, it.get("cuota"), it.get("monto"))
+        elif accion == "omitir":
+            motivo = tracker.omitir_web_motivo(uid, clave)
+        else:
+            motivo = f"acción desconocida ({_s(accion, 20)})"
+        etiqueta = f"#{i} {_s(accion, 20)} {_s(uid, 20)} {_s(clave, 30)}"
+        if motivo:
+            fallos += 1
+            print(f"✘ {etiqueta}: {motivo}")
+        else:
+            print(f"✔ {etiqueta}")
+    print(f"{len(items) - fallos}/{len(items)} aplicados" + (f" · {fallos} con error" if fallos else ""))
+    return 1 if fallos else 0
 
 
 def main():
@@ -140,7 +222,10 @@ def main():
             for k, v in sorted(r["por_mercado"].items()):
                 print(f"  {k:24s} n={v['n']:4d}  neto ${v['neto']:+.2f}")
         else:
-            print("Aún no hay picks liquidados.")
+            print(f"Aún no hay apuestas registradas y liquidadas (sin registrar: {r.get('pendientes_sin_registrar', 0)} pendientes).")
+        t = r.get("teorico") or {}
+        if t.get("n"):
+            print(f"[HIPOTÉTICO, no es ROI real] {t['n']} picks | ROI {t['roi']:+.1%} | neto ${t['neto']:+.2f}")
         print("\nPrecisión por fuente (Brier, más bajo = mejor):")
         for (s, fam), v in sorted(tracker.calibracion().items(), key=lambda kv: (kv[0][1], kv[1]["brier"])):
             print(f"  {fam:8s} {s:12s} brier {v['brier']:.4f}  n={v['n']}")
@@ -149,7 +234,13 @@ def main():
             print(f"[{p['id']}] {p['inicio'][:16]} {p['local']} vs {p['visita']} | {p['nombre']} | "
                   f"mín {p['cuota_minima']:.2f} | tomada {p['cuota_tomada'] or '-'} | ${p['monto']:.2f} ({p['tipo']})")
     elif cmd == "registrar":
-        tracker.registrar(int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]) if len(sys.argv) > 4 else None)
+        try:
+            pid, cuota = int(sys.argv[2]), sys.argv[3]
+            monto = sys.argv[4] if len(sys.argv) > 4 else None
+        except (IndexError, ValueError):
+            sys.exit("Uso: python main.py registrar ID CUOTA [MONTO]")
+        if not tracker.registrar(pid, cuota, monto):
+            sys.exit("✘ No se registró (pick inexistente, ya liquidado o cuota/monto inválidos)")
         exportar.historial()
         print("✓ Registrado")
     elif cmd == "omitir":
@@ -157,13 +248,29 @@ def main():
         exportar.historial()
         print("✓ Omitido")
     elif cmd == "registrar-web":   # usado por la página web (workflow registrar.yml)
-        uid, clave, cuota, monto = sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5])
-        print("✓ Registrado" if tracker.registrar_web(uid, clave, cuota, monto) else "✘ Pick no encontrado")
+        if len(sys.argv) < 6:
+            sys.exit("Uso: python main.py registrar-web UID CLAVE CUOTA MONTO")
+        motivo = tracker.registrar_web_motivo(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+        if motivo:
+            sys.exit(f"✘ No registrado: {motivo}")
         exportar.historial()
+        print("✓ Registrado")
     elif cmd == "omitir-web":
-        tracker.omitir_web(sys.argv[2], sys.argv[3])
+        if len(sys.argv) < 4:
+            sys.exit("Uso: python main.py omitir-web UID CLAVE")
+        motivo = tracker.omitir_web_motivo(sys.argv[2], sys.argv[3])
+        if motivo:
+            sys.exit(f"✘ No omitido: {motivo}")
         exportar.historial()
         print("✓ Omitido")
+    elif cmd == "registrar-lote":   # el JSON viaja en la variable de entorno LOTE, no en argv
+        codigo = registrar_lote(os.environ.get("LOTE", ""))   # ya guardó en la DB todo ítem válido
+        try:
+            exportar.historial()
+        except Exception as ex:  # noqa: BLE001 - un fallo al exportar no debe ocultar el código del lote
+            print(f"! historial no exportado: {type(ex).__name__}: {ex}")
+            codigo = codigo or 1
+        sys.exit(codigo)
     elif cmd == "backtest":
         res = backtest.correr(cfg)
         exportar.backtest(res)

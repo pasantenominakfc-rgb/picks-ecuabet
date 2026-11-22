@@ -2,30 +2,36 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#101114">
+<meta name="theme-color" content="#f3f3f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101114" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Picks">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Picks · Valor diario</title>
 <style>
 :root{
   --bg:#f3f3f1;--surface:#fcfcfb;--raised:#ffffff;--line:#e4e3df;--chip:#efeeea;
-  --tx:#0b0b0b;--tx2:#52514e;--tx3:#7d7c77;
-  --accent:#2a78d6;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#6250d6;
-  --good:#0a8a0a;--bad:#d03b3a;--warn:#b87800;
+  --tx:#0b0b0b;--tx2:#52514e;--tx3:#66655f;
+  --accent:#1f65bd;--accbg:#1f65bd;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#6250d6;
+  --good:#087408;--bad:#b8302f;--warn:#8a5a00;--selfg:#ffffff;
   --r:16px;--sh:0 1px 2px #0000000d,0 4px 16px #0000000a;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#101114;--surface:#1a1a19;--raised:#202120;--line:#2e2f2d;--chip:#2a2b29;
-  --tx:#f0efec;--tx2:#c3c2b7;--tx3:#8e8d86;
-  --accent:#3987e5;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#9085e9;
-  --good:#2fbf4a;--bad:#ef6a69;--warn:#e0a52a;--sh:none}}
+  --tx:#f0efec;--tx2:#c3c2b7;--tx3:#a3a29b;
+  --accent:#4a93ea;--accbg:#2a6fc9;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#9085e9;
+  --good:#2fbf4a;--bad:#ef6a69;--warn:#e0a52a;--selfg:#0b0b0b;--sh:none}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .app{max-width:760px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 96px)}
 header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:6px 2px 14px}
 h1{font-size:26px;letter-spacing:-.02em;margin:0;font-weight:750}
@@ -52,14 +58,15 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--tx3)
 .oddsbox{display:flex;gap:8px;margin-top:10px}
 .oddsbox input{flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-size:16px;font-variant-numeric:tabular-nums}
 .btn{border:0;border-radius:12px;padding:11px 14px;font-weight:650;background:var(--chip);cursor:pointer;white-space:nowrap}
-.btn.pri{background:var(--accent);color:#fff}
-.btn.sel{background:var(--good);color:#fff}
-.btn.small{padding:7px 10px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.55;cursor:default}
+.btn.pri{background:var(--accbg);color:#fff}
+.btn.sel{background:var(--good);color:var(--selfg)}
+.btn.small{padding:7px 12px;font-size:13px;border-radius:10px;min-height:44px;min-width:44px}
 .calc{margin-top:8px;font-weight:650;font-size:14px;min-height:20px}
 .calc.ok{color:var(--good)} .calc.bad{color:var(--bad)}
 nav{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:6px 6px calc(env(safe-area-inset-bottom) + 6px);display:flex;justify-content:center;z-index:5}
 nav .in{display:flex;max-width:760px;width:100%;justify-content:space-around}
-nav button{background:none;border:0;padding:6px 4px;font-size:11px;color:var(--tx3);display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:pointer}
+nav button{background:none;border:0;padding:6px 4px;font-size:11px;color:var(--tx3);display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:pointer;min-height:44px}
 nav button svg{width:22px;height:22px}
 nav button.on{color:var(--accent);font-weight:650}
 .ticketbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 66px);background:var(--tx);color:var(--bg);border-radius:999px;padding:10px 12px 10px 18px;display:none;align-items:center;gap:14px;box-shadow:0 6px 24px #0004;z-index:6;width:min(92vw,520px);justify-content:space-between}
@@ -68,14 +75,15 @@ nav button.on{color:var(--accent);font-weight:650}
 .sheet{position:fixed;inset:0;background:#0007;display:none;z-index:9;align-items:flex-end;justify-content:center}
 .sheet.show{display:flex}
 .sheet .panel{background:var(--surface);width:min(100%,760px);max-height:86vh;overflow:auto;border-radius:22px 22px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom) + 18px)}
+.tw{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
 th{color:var(--tx3);font-weight:600;font-size:11.5px;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}
 td{padding:8px 4px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
-td:first-child{white-space:normal}
+td:first-child{white-space:normal;min-width:140px}
 th:first-child,td:first-child{text-align:left}
 .pos{color:var(--good)} .neg{color:var(--bad)}
 .chips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
-.chips button{border:1px solid var(--line);background:var(--raised);border-radius:999px;padding:6px 12px;font-size:13px;white-space:nowrap;cursor:pointer}
+.chips button{border:1px solid var(--line);background:var(--raised);border-radius:999px;padding:6px 12px;font-size:13px;white-space:nowrap;cursor:pointer;min-height:44px}
 .chips button.on{background:var(--tx);color:var(--bg);border-color:var(--tx)}
 .search{width:100%;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:var(--raised);margin-bottom:8px}
 details.m{background:var(--raised);border:1px solid var(--line);border-radius:14px;margin:8px 0;overflow:hidden}
@@ -97,12 +105,16 @@ details.m .body{padding:0 14px 14px}
 .field{display:block;margin:10px 0}
 .field span{display:block;font-size:12.5px;color:var(--tx2);margin-bottom:4px}
 .field input{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--raised)}
+.field .row input{flex:1;min-width:0;width:auto}
 .toast{position:fixed;top:calc(env(safe-area-inset-top) + 14px);left:50%;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;z-index:20;display:none;max-width:90vw}
 .note{font-size:12.5px;color:var(--tx2);background:var(--chip);border-radius:12px;padding:10px 12px;margin:10px 0}
+.banner{border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13.5px;font-weight:650;color:var(--tx);border:1px solid var(--line);background:var(--chip)}
+.banner.bad{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,var(--raised))}
+.banner.warn{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--raised))}
 code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:5px}
 .hide{display:none!important}
 .seg{display:flex;background:var(--chip);border-radius:12px;padding:3px;gap:3px;margin:14px 0 4px;position:sticky;top:calc(env(safe-area-inset-top) + 4px);z-index:4}
-.seg button{flex:1;border:0;background:none;padding:9px 4px;border-radius:9px;font-weight:650;font-size:14px;color:var(--tx2);cursor:pointer}
+.seg button{flex:1;border:0;background:none;padding:9px 4px;border-radius:9px;font-weight:650;font-size:14px;color:var(--tx2);cursor:pointer;min-height:44px}
 .seg button.on{background:var(--raised);color:var(--tx);box-shadow:var(--sh)}
 .seg small{display:block;font-weight:500;font-size:10.5px;color:var(--tx3)}
 .ia{margin-top:8px;border-left:3px solid var(--s6);padding:6px 10px;background:var(--chip);border-radius:0 10px 10px 0;font-size:12.5px}
@@ -118,11 +130,12 @@ code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:5px}
 </style>
 </head>
 <body>
-<div class="app">
+<div class="app" id="appmain">
   <header>
     <div><h1 id="titulo">Hoy</h1><div class="sub" id="sub">Cargando…</div></div>
     <button class="btn small" id="recargar" aria-label="Recargar datos">↻</button>
   </header>
+  <div id="avisos" aria-live="polite"></div>
   <section id="v-hoy"></section>
   <section id="v-partidos" class="hide"></section>
   <section id="v-rend" class="hide"></section>
@@ -131,475 +144,17 @@ code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:5px}
 </div>
 
 <div class="ticketbar" id="ticketbar"><span id="tbtxt"></span><button class="btn small" id="vertk">Ver ticket</button></div>
-<div class="sheet" id="sheet"><div class="panel" id="sheetp"></div></div>
-<div class="toast" id="toast"></div>
+<div class="sheet" id="sheet"><div class="panel" id="sheetp" role="dialog" aria-modal="true" aria-labelledby="sheet-t"></div></div>
+<div class="toast" id="toast" role="status"></div>
 
-<nav><div class="in">
-  <button data-v="hoy" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5L5.5 21l2-7.5L2 9h7z"/></svg>Hoy</button>
-  <button data-v="partidos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 5h-5L8 10z"/></svg>Partidos</button>
-  <button data-v="rend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>Rendimiento</button>
-  <button data-v="fuentes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Fuentes</button>
-  <button data-v="ajustes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Ajustes</button>
+<nav aria-label="Secciones"><div class="in">
+  <button data-v="hoy" class="on" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5L5.5 21l2-7.5L2 9h7z"/></svg>Hoy</button>
+  <button data-v="partidos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 5h-5L8 10z"/></svg>Partidos</button>
+  <button data-v="rend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>Rendimiento</button>
+  <button data-v="fuentes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Fuentes</button>
+  <button data-v="ajustes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Ajustes</button>
 </div></nav>
 
-<script>
-"use strict";
-// ---------------------------------------------------------------- estado
-const D = {hoy:null, hist:null, fuentes:null, bt:null, sim:null};
-let nivel = LS_get0("nivel","seguras");
-let fechaSel = null, regionSel = "Todas", ligaSel = "Todas";
-const pasaFiltro = x => (regionSel==="Todas" || x.region===regionSel) && (ligaSel==="Todas" || x.liga===ligaSel);
-function dia(){
-  const vacio = {valor:[], alta:[], seguras:[], grandes:[], pool:[], combinada:null};
-  if(!D.hoy || !D.hoy.dias) return vacio;
-  if(!fechaSel || !D.hoy.dias[fechaSel]) fechaSel = (D.hoy.fechas||[])[0];
-  const d = D.hoy.dias[fechaSel] || vacio;
-  return {valor:d.valor.filter(pasaFiltro), alta:d.alta.filter(pasaFiltro), seguras:(d.seguras||[]).filter(pasaFiltro),
-          grandes:(d.grandes||[]).filter(c=>c.piernas.every(pasaFiltro)), pool:(d.pool||[]).filter(pasaFiltro), combinada:d.combinada};
-}
-function etiquetaFecha(f, i){
-  if(i===0) return "Hoy"; if(i===1) return "Mañana";
-  const d = new Date(f+"T12:00:00"); return DIAS[d.getDay()]+" "+d.getDate();
-}
-function barraFiltros(){
-  if(!D.hoy || !D.hoy.fechas) return "";
-  const fs = D.hoy.fechas;
-  if(!fechaSel || !fs.includes(fechaSel)) fechaSel = fs[0];
-  const delDia = D.hoy.partidos.filter(p=>p.fecha===fechaSel);
-  const regiones = ["Todas", ...["Europa","Sudamérica","Norteamérica"].filter(r=>delDia.some(p=>p.region===r))];
-  const ligas = ["Todas", ...new Set(delDia.filter(p=>regionSel==="Todas"||p.region===regionSel).map(p=>p.liga))];
-  if(!ligas.includes(ligaSel)) ligaSel = "Todas";
-  return `<div class="chips fechas">${fs.map((f,i)=>`<button class="${f===fechaSel?"on":""}" data-fecha="${f}">${etiquetaFecha(f,i)}<small style="display:block;font-size:10px;opacity:.7">${D.hoy.partidos.filter(p=>p.fecha===f).length} partidos</small></button>`).join("")}</div>
-    <div class="chips">${regiones.map(r=>`<button class="${r===regionSel?"on":""}" data-region="${esc(r)}">${r==="Todas"?"Todas las regiones":esc(r)}</button>`).join("")}</div>
-    <div class="chips">${ligas.map(l=>`<button class="${l===ligaSel?"on":""}" data-ligasel="${esc(l)}">${l==="Todas"?"Todas las ligas":esc(l)}</button>`).join("")}</div>`;
-}
-function ligarFiltros(el, rerender){
-  el.querySelectorAll("[data-fecha]").forEach(b=>b.onclick=()=>{ fechaSel=b.dataset.fecha; ligaSel="Todas"; rerender(); barra() });
-  el.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{ regionSel=b.dataset.region; ligaSel="Todas"; rerender(); barra() });
-  el.querySelectorAll("[data-ligasel]").forEach(b=>b.onclick=()=>{ ligaSel=b.dataset.ligasel; rerender(); barra() });
-}
-function LS_get0(k,d){ try{ const v=localStorage.getItem("picks."+k); return v===null?d:JSON.parse(v) }catch(e){ return d } }
-const LS = {
-  get(k, d){ try{ const v = localStorage.getItem("picks."+k); return v===null? d : JSON.parse(v) }catch(e){ return d } },
-  set(k, v){ try{ localStorage.setItem("picks."+k, JSON.stringify(v)) }catch(e){} }
-};
-let ajustes = LS.get("ajustes", {owner:"", repo:"", token:"", banca:null});
-let cuotas = LS.get("cuotas", {});        // key uid|clave -> cuota tecleada
-let ticket = LS.get("ticket", {});        // key -> true
-let hechos = LS.get("hechos", {});        // key -> {cuota,monto,estado} registro local optimista
-const FUENTE = {mercado:["Mercado","--s1"], modelo:["Modelo","--s2"], forebet:["Forebet","--s3"], apifootball:["API-Football","--s4"], penaltyblog:["penaltyblog","--s5"], ia:["IA (Groq)","--s6"], ensamble:["Combinado","--tx2"]};
-const DIAS = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const pct = (x,d=0) => x==null? "–" : (x*100).toFixed(d)+"%";
-const c2 = x => x==null? "–" : (+x).toFixed(2);
-const usd = x => x==null? "–" : (x<0?"−":"+")+"$"+Math.abs(x).toFixed(2);
-const key = s => s.uid+"|"+s.clave;
-const hora = iso => { const d=new Date(iso); return DIAS[d.getDay()]+" "+d.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit",hour12:false}) };
-function toast(t){ const el=$("#toast"); el.textContent=t; el.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>el.style.display="none",2600) }
-function cfg(){ const c = (D.hoy && D.hoy.config) || {banca:100,fraccion_kelly:.25,stake_max_pct:.03,ventaja_minima:.04,stake_minimo:1}; return ajustes.banca? {...c, banca:+ajustes.banca} : c }
-
-// --------------------------------------------------------------- cálculo
-function evalCuota(s, o){
-  const c = cfg(), pp = s.p_push||0;
-  const ev = (1-pp)*(s.p*o-1);
-  const k = Math.max(0, Math.min((1-pp)*(s.p*o-1)/(o-1)*c.fraccion_kelly, c.stake_max_pct));
-  const monto = k>0 ? Math.max(c.stake_minimo, Math.round(k*c.banca*4)/4) : 0;
-  return {ev, monto, ok: ev >= c.ventaja_minima};
-}
-
-// ------------------------------------------------------------- carga
-async function cargar(){
-  const t = Date.now();
-  const get = async n => { try{ const r = await fetch(`data/${n}.json?t=${t}`); return r.ok? r.json() : null }catch(e){ return null } };
-  [D.hoy, D.hist, D.fuentes, D.bt, D.sim] = await Promise.all(["hoy","historial","fuentes","backtest","simulacion30"].map(get));
-  const g = D.hoy && new Date(D.hoy.generado);
-  $("#sub").textContent = g ? `Actualizado ${g.toLocaleDateString("es-EC",{weekday:"long",day:"numeric",month:"short"})}, ${g.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})}` : "Aún no hay datos: corre el análisis desde Ajustes";
-  renderTodo();
-}
-function renderTodo(){ vHoy(); vPartidos(); vRend(); vFuentes(); vAjustes(); barra() }
-
-// ----------------------------------------------------------- HOY
-function fuentesHTML(s){
-  return Object.entries(s.detalle||{}).sort((a,b)=>(s.pesos?.[b[0]]||0)-(s.pesos?.[a[0]]||0)).map(([f,p])=>{
-    const [n,v] = FUENTE[f]||[f,"--tx3"];
-    return `<span class="src"><span class="dot" style="background:var(${v})"></span>${n} <b>${pct(p)}</b>${s.pesos&&s.pesos[f]!=null?` <span class="meta">${pct(s.pesos[f])}</span>`:""}</span>`}).join("");
-}
-function iaHTML(s){
-  if(!s.ia) return "";
-  const t = {bajo:["ok","Riesgo bajo"], medio:["warn","Riesgo medio"], alto:["bad","Riesgo alto"]}[s.ia.riesgo]||["","IA"];
-  return `<div class="ia"><span class="tag ${t[0]}">IA · ${t[1]}</span> ${esc(s.ia.resumen||"")}${(s.ia.alertas||[]).length?`<ul>${s.ia.alertas.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`:""}</div>`;
-}
-function umbral(tipo){ return tipo==="valor" ? cfg().ventaja_minima : 0 }
-function tarjeta(s, i, tipo){
-  const k = key(s), o = cuotas[k] ?? s.cuota_ecuabet ?? "";
-  const h = hechos[k], enT = !!ticket[k];
-  const minimo = tipo==="valor" ? s.cuota_minima : s.cuota_justa;
-  const estado = s.confirmado ? `<span class="tag ok">Cuota de Ecuabet confirmada</span>`
-              : `<span class="tag warn">Apostar solo si Ecuabet paga ≥ ${c2(minimo)}</span>`;
-  const ref = tipo==="valor"
-      ? (s.mejor_cuota ? `Mejor cuota: ${c2(s.mejor_cuota)} (${esc(s.mejor_casa)})${s.ev!=null?` · valor ${pct(s.ev,1)}`:""}` : "Sin cuota de referencia")
-      : `Gana ${pct(s.p)} de las veces · ${s.tipo_cuota==="ecuabet"?"Ecuabet paga":"las casas suelen pagar"} ~${c2(s.cuota_est)}`;
-  const g3 = tipo==="segura" ? [pct(s.p),"Probabilidad"] : [pct(s.p),"Probabilidad"];
-  return `<div class="card" data-k="${esc(k)}">
-    <div class="row meta"><span>#${i} · ${esc(s.liga)} · ${esc(s.mercado)}</span><span>${hora(s.inicio)}</span></div>
-    <div class="match">${esc(s.local)} <small>vs</small> ${esc(s.visita)}</div>
-    <div class="pick">${esc(s.nombre)}</div>
-    <div class="grid4">
-      <div><b>${g3[0]}</b><span>${g3[1]}</span></div>
-      <div><b>${c2(s.cuota_justa)}</b><span>Cuota justa</span></div>
-      <div><b>${c2(minimo)}</b><span>Cuota mínima</span></div>
-      <div><b>${s.monto? "$"+(+s.monto).toFixed(2) : "–"}</b><span>${tipo==="segura"?`Cobras $${(s.monto*minimo).toFixed(2)}`:"Monto"}</span></div>
-    </div>
-    <div class="srcs">${fuentesHTML(s)}</div>
-    <div class="meta">${ref}</div>
-    ${iaHTML(s)}
-    <div style="margin-top:8px">${estado} ${h?`<span class="tag ok">Registrada ${h.estado==="omitida"?"(omitida)":"$"+h.monto+" @ "+h.cuota}</span>`:""}</div>
-    <div class="oddsbox">
-      <input type="number" inputmode="decimal" step="0.01" min="1.01" placeholder="Cuota Ecuabet" value="${o}" data-in="${esc(k)}" data-tipo="${tipo}" aria-label="Cuota que ves en Ecuabet">
-      <button class="btn ${enT?"sel":""}" data-tk="${esc(k)}">${enT?"✓ En ticket":"+ Ticket"}</button>
-    </div>
-    <div class="calc" data-calc="${esc(k)}"></div>
-  </div>`;
-}
-function todosPicks(){
-  if(!D.hoy) return [];
-  // todos los días (para que el ticket conserve picks de otras fechas)
-  return Object.values(D.hoy.dias||{}).flatMap(d=>[...d.valor.map(s=>({...s,_t:"valor"})), ...(d.seguras||[]).map(s=>({...s,_t:"segura"})), ...d.alta.map(s=>({...s,_t:"alta"}))]);
-}
-function pintarCalc(k){
-  const s = todosPicks().find(x=>key(x)===k), el = document.querySelector(`[data-calc="${CSS.escape(k)}"]`);
-  if(!s||!el) return;
-  const o = parseFloat(cuotas[k] ?? s.cuota_ecuabet);
-  if(!o){ el.textContent=""; el.className="calc"; return }
-  const r = evalCuota(s, o), ok = r.ev >= umbral(s._t);
-  const monto = s._t==="segura" ? +s.monto : r.monto;
-  el.className = "calc " + (ok?"ok":"bad");
-  el.textContent = ok ? `✔ Vale la pena (valor ${(r.ev*100).toFixed(1)}%) → apostar $${monto.toFixed(2)}` : `✘ Paga poco (valor ${(r.ev*100).toFixed(1)}%) → no apostar`;
-}
-
-// ---- armador de combinadas (misma lógica que el servidor)
-let gMonto = LS_get0("gMonto", 5), gObj = LS_get0("gObj", 100);
-function armar(pool, objCuota, maxP=8){
-  const orden = [...pool].filter(s=>!(s.ia&&s.ia.riesgo==="alto")).sort((a,b)=>a.eficiencia-b.eficiencia);
-  const el=[], usados=new Set(); let c=1;
-  for(const s of orden){ if(c>=objCuota||el.length>=maxP) break; if(usados.has(s.uid)) continue; el.push(s); usados.add(s.uid); c*=s.cuota_est }
-  if(c < objCuota*0.97 || !el.length) return null;
-  const p = el.reduce((t,s)=>t*s.p,1);
-  return {piernas:el, cuota:c, p};
-}
-function combinadaHTML(c, monto, titulo){
-  const gan = monto*c.cuota, veces = Math.max(1, Math.round(1/c.p));
-  return `<div class="card">
-    <div class="row"><span class="meta">${esc(titulo)}</span><span class="tag">${c.piernas.length} selecciones</span></div>
-    <div class="row" style="align-items:flex-end;margin:6px 0"><div><div class="big">$${gan.toFixed(0)}</div><div class="meta">cobras si apuestas $${(+monto).toFixed(2)} · cuota ${c.cuota.toFixed(2)}</div></div>
-      <div style="text-align:right"><b style="font-size:18px">${(c.p*100).toFixed(1)}%</b><div class="meta">≈ 1 de cada ${veces}</div></div></div>
-    <div class="prob-bar" role="img" aria-label="Probabilidad ${(c.p*100).toFixed(1)}%"><i style="width:${Math.max(2,c.p*100)}%"></i></div>
-    ${c.piernas.map(s=>`<div class="leg"><span><b>${esc(s.nombre)}</b><br><span class="meta">${esc(s.local)} vs ${esc(s.visita)} · ${hora(s.inicio)}</span>${s.ia&&s.ia.riesgo==="medio"?' <span class="tag warn">IA: riesgo medio</span>':""}</span><span style="text-align:right">${pct(s.p)}<br><span class="meta">~${c2(s.cuota_est)}</span></span></div>`).join("")}
-    <div class="row" style="gap:8px;margin-top:10px;justify-content:flex-start"><button class="btn small" data-copiarcomb='${esc(JSON.stringify(c.piernas.map(s=>`${s.local} vs ${s.visita} — ${s.nombre}`)))}'>Copiar para Ecuabet</button></div>
-  </div>`;
-}
-function vGrandes(){
-  const DD = dia();
-  let h = `<div class="note">Combinadas para ganar mucho con poco. El sistema elige las selecciones que <b>más probabilidad conservan</b> por cada punto de cuota que suman. Aun así, la mayoría no se gana: mira la probabilidad real de cada una.</div>`;
-  h += `<div class="card"><b>Arma la tuya</b>
-    <label class="field"><span>Monto a apostar (USD)</span><input type="number" inputmode="decimal" id="g-monto" value="${gMonto}"></label>
-    <div class="meta" style="margin-bottom:6px">Quiero ganar:</div>
-    <div class="chips obj">${[50,100,200,500,1000].map(v=>`<button class="${v==gObj?"on":""}" data-obj="${v}">$${v}</button>`).join("")}</div>
-    <div id="g-res"></div></div>`;
-  if(DD.grandes.length) h += `<h2>Combinadas sugeridas</h2>` + DD.grandes.map(c=>combinadaHTML(c, c.monto, `Objetivo $${c.objetivo}`)).join("");
-  h += `<h2>Cómo se comportan</h2><div class="card meta">En la prueba con datos reales de los últimos 30 días, las piernas acertaron lo que el sistema predijo (63% contra 64% esperado), pero las combinadas de $100 y $200 se perdieron todas. Con 7–8 selecciones basta con que falle una. Apuesta en ellas solo lo que estés dispuesto a perder.</div>`;
-  return h;
-}
-function pintarBuilder(){
-  const el=$("#g-res"); if(!el) return;
-  const c = armar(dia().pool, gObj/Math.max(0.5,gMonto));
-  el.innerHTML = c ? combinadaHTML(c, gMonto, `Para ganar ~$${gObj}`) : `<div class="empty">Con los partidos de este día no se llega a ese objetivo con ese monto. Sube el monto o baja el objetivo.</div>`;
-}
-function vHoy(){
-  const el = $("#v-hoy");
-  if(!D.hoy){ el.innerHTML = `<div class="card empty">Todavía no hay picks.<br>Cuando el sistema corra (todos los días 07:00 y 13:00) aparecerán aquí.</div>`; return }
-  const DD = dia(), v = DD.valor, a = DD.alta, sg = DD.seguras, gr = DD.grandes;
-  let h = barraFiltros() + `<div class="seg" role="tablist">
-    <button class="${nivel==="seguras"?"on":""}" data-nivel="seguras">Seguras<small>${sg.length} picks</small></button>
-    <button class="${nivel==="valor"?"on":""}" data-nivel="valor">Valor<small>${v.length} picks</small></button>
-    <button class="${nivel==="grandes"?"on":""}" data-nivel="grandes">Grandes<small>${gr.length} combinadas</small></button></div>`;
-  if(nivel==="seguras"){
-    h += `<div class="note">Apuestas pequeñas con alta probabilidad (cuota 1.25–1.60). Escribe la cuota de Ecuabet y te digo si paga lo suficiente.</div>`;
-    h += sg.length ? sg.map((s,i)=>tarjeta(s,i+1,"segura")).join("") : `<div class="card empty">No hay selecciones con probabilidad suficiente para este filtro.</div>`;
-  } else if(nivel==="valor"){
-    h += `<div class="note">Apuestas donde la cuota paga más de lo que vale. Son las más rentables a largo plazo, pero aparecen menos.</div>`;
-    h += v.length ? v.map((s,i)=>tarjeta(s,i+1,"valor")).join("") : `<div class="card empty"><b>Hoy no hay apuestas de valor claras.</b><br>Revisa las seguras o escribe cuotas de Ecuabet en "Partidos".</div>`;
-    if(a.length) h += `<h2>Alta probabilidad</h2>` + a.map((s,i)=>tarjeta(s,i+1,"alta")).join("");
-  } else {
-    h += vGrandes();
-  }
-  h += `<h2>Cómo sacar tu código de Ecuabet</h2><div class="card"><ol style="margin:0;padding-left:20px">
-      <li>Toca <b>+ Ticket</b> en los picks que quieres jugar, o <b>Copiar para Ecuabet</b> en una combinada.</li><li>Abre Ecuabet, busca cada partido y escribe aquí la cuota que ves.</li>
-      <li>Si sale ✔, agrégalo al cupón de Ecuabet.</li><li>En el cupón toca <b>guardar/reservar apuesta</b>: ese es tu código.</li>
-      <li>En <b>Ver ticket</b> toca <b>Registrar apuestas</b> para medir tu rendimiento.</li></ol></div>`;
-  el.innerHTML = h;
-  ligarFiltros(el, vHoy);
-  el.querySelectorAll("[data-nivel]").forEach(b=>b.onclick=()=>{ nivel=b.dataset.nivel; LS.set("nivel",nivel); vHoy(); barra() });
-  if(nivel==="grandes"){
-    $("#g-monto").oninput=e=>{ gMonto=+e.target.value||0; LS.set("gMonto",gMonto); pintarBuilder() };
-    el.querySelectorAll("[data-obj]").forEach(b=>b.onclick=()=>{ gObj=+b.dataset.obj; LS.set("gObj",gObj); el.querySelectorAll("[data-obj]").forEach(x=>x.classList.toggle("on",x===b)); pintarBuilder() });
-    pintarBuilder();
-  }
-  todosPicks().forEach(s=>pintarCalc(key(s)));
-}
-document.addEventListener("click", async e=>{
-  const b=e.target.closest("[data-copiarcomb]"); if(!b) return;
-  try{ await navigator.clipboard.writeText(JSON.parse(b.dataset.copiarcomb).join("\n")); toast("Combinada copiada") }catch(x){ toast("No se pudo copiar") }
-});
-document.addEventListener("input", e=>{
-  const k = e.target.dataset.in; if(!k) return;
-  cuotas[k] = e.target.value; LS.set("cuotas", cuotas); pintarCalc(k); barra();
-});
-document.addEventListener("click", e=>{
-  const b = e.target.closest("[data-tk]"); if(!b) return;
-  const k = b.dataset.tk; ticket[k] ? delete ticket[k] : ticket[k]=true; LS.set("ticket", ticket);
-  b.classList.toggle("sel", !!ticket[k]); b.textContent = ticket[k] ? "✓ En ticket" : "+ Ticket"; barra();
-});
-
-// ---------------------------------------------------------- TICKET
-function itemsTicket(){ return todosPicks().filter(s=>ticket[key(s)]) }
-function barra(){
-  const it = itemsTicket(), bar = $("#ticketbar");
-  bar.classList.toggle("show", it.length>0 && !$("#v-hoy").classList.contains("hide"));
-  const montoDe = s=>{ const o=parseFloat(cuotas[key(s)]); if(s._t==="segura") return +s.monto||0; return o? evalCuota(s,o).monto : (s._t==="valor"? +s.monto:0) };
-  const tot = it.reduce((t,s)=>t+montoDe(s),0);
-  $("#tbtxt").textContent = `${it.length} en ticket · $${tot.toFixed(2)}`;
-}
-$("#vertk").onclick = ()=>{
-  const it = itemsTicket();
-  const filas = it.map(s=>{
-    const k=key(s), o=parseFloat(cuotas[k]); const r = o? evalCuota(s,o) : null;
-    if(r) r.ok = r.ev >= umbral(s._t);
-    const monto = s._t==="segura" ? +s.monto : (r? r.monto : (s._t==="valor"? +s.monto : 0));
-    return `<tr><td><b>${esc(s.nombre)}</b><br><span class="meta">${esc(s.local)} vs ${esc(s.visita)} · ${hora(s.inicio)}</span></td>
-      <td>${o? c2(o) : `<span class="meta">mín ${c2(s.cuota_minima)}</span>`}</td><td>${monto? "$"+monto.toFixed(2):"–"}</td>
-      <td>${r? (r.ok? '<span class="pos">✔</span>':'<span class="neg">✘</span>') : "·"}</td></tr>`}).join("");
-  $("#sheetp").innerHTML = `<div class="row"><h1 style="font-size:22px">Mi ticket</h1><button class="btn small" id="cerrar">Cerrar</button></div>
-    <table><tr><th>Selección</th><th>Cuota</th><th>Monto</th><th></th></tr>${filas}</table>
-    <div class="note">Arma este mismo cupón en Ecuabet y toca <b>guardar/reservar apuesta</b> para obtener tu código. Solo se registran los picks marcados con ✔.</div>
-    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="copiar">Copiar lista</button>
-    <button class="btn pri" id="registrar">Registrar apuestas</button><button class="btn" id="vaciar">Vaciar</button></div>`;
-  $("#sheet").classList.add("show");
-  $("#cerrar").onclick = ()=>$("#sheet").classList.remove("show");
-  $("#vaciar").onclick = ()=>{ ticket={}; LS.set("ticket",ticket); $("#sheet").classList.remove("show"); renderTodo() };
-  $("#copiar").onclick = async ()=>{
-    const txt = it.map(s=>`${s.local} vs ${s.visita} — ${s.nombre} (cuota mín. ${c2(s.cuota_minima)})`).join("\n");
-    try{ await navigator.clipboard.writeText(txt); toast("Lista copiada") }catch(e){ toast("No se pudo copiar") }
-  };
-  $("#registrar").onclick = async ()=>{
-    let n=0;
-    for(const s of it){
-      const k=key(s), o=parseFloat(cuotas[k]); if(!o) continue;
-      const r=evalCuota(s,o); if(r.ev < umbral(s._t)) continue;
-      const monto = s._t==="segura" ? +s.monto : r.monto;
-      hechos[k]={cuota:o, monto, estado:"pendiente"}; n++;
-      await despachar("registrar.yml", {accion:"registrar", uid:String(s.uid), clave:s.clave, cuota:String(o), monto:String(monto)});
-    }
-    LS.set("hechos",hechos); ticket={}; LS.set("ticket",ticket); $("#sheet").classList.remove("show");
-    toast(n? `${n} apuesta(s) registrada(s)` : "Escribe la cuota de Ecuabet en cada pick ✔ antes de registrar"); renderTodo();
-  };
-};
-$("#sheet").onclick = e=>{ if(e.target.id==="sheet") $("#sheet").classList.remove("show") };
-
-async function despachar(wf, inputs){
-  if(!ajustes.owner||!ajustes.repo||!ajustes.token){ toast("Registrado solo en este teléfono. Conecta GitHub en Ajustes para guardarlo en el sistema."); return false }
-  try{
-    const r = await fetch(`https://api.github.com/repos/${ajustes.owner}/${ajustes.repo}/actions/workflows/${wf}/dispatches`,
-      {method:"POST", headers:{Authorization:`Bearer ${ajustes.token}`, Accept:"application/vnd.github+json"}, body:JSON.stringify({ref:"main", inputs})});
-    if(!r.ok) throw new Error(r.status);
-    return true;
-  }catch(e){ toast("GitHub rechazó la solicitud ("+e.message+"). Revisa el token en Ajustes."); return false }
-}
-
-// -------------------------------------------------------- PARTIDOS
-let busca = "";
-const PRINCIPALES = [["1x2:1","1"],["1x2:X","X"],["1x2:2","2"],["dc:1X","1X"],["dc:X2","X2"],["btts:si","Ambos marcan"],
-  ["ou:1.5:over","+1.5 goles"],["ou:2.5:over","+2.5 goles"],["ou:3.5:over","+3.5 goles"],["ht1x2:X","Empate al descanso"],
-  ["corners:9.5:over","+9.5 córners"],["cards:4.5:over","+4.5 tarjetas"]];
-function vPartidos(){
-  const el = $("#v-partidos");
-  if(!D.hoy){ el.innerHTML = `<div class="card empty">Sin datos.</div>`; return }
-  const filtros = barraFiltros();
-  const ps = D.hoy.partidos.filter(p=>p.fecha===fechaSel && pasaFiltro(p) && (`${p.local} ${p.visita}`.toLowerCase().includes(busca)));
-  el.innerHTML = filtros + `<input class="search" placeholder="Buscar equipo…" value="${esc(busca)}" id="busca">
-    <div class="meta" style="margin:0 2px 6px">${ps.length} partidos</div>
-    ${ps.map(p=>{
-      const pr=p.probs, e=p.esperados||{};
-      const cor = e.corners||e.corners_fb, tar = e.tarjetas||e.tarjetas_fb;
-      return `<details class="m"><summary>
-        <div class="row meta"><span>${esc(p.liga)}</span><span>${hora(p.inicio)}</span></div>
-        <div class="match">${esc(p.local)} <small>vs</small> ${esc(p.visita)}</div>
-        <div class="bar3" role="img" aria-label="Local ${pct(pr["1x2:1"])}, empate ${pct(pr["1x2:X"])}, visita ${pct(pr["1x2:2"])}">
-          <i style="width:${(pr["1x2:1"]||0)*100}%;background:var(--s1)"></i><i style="width:${(pr["1x2:X"]||0)*100}%;background:var(--tx3)"></i><i style="width:${(pr["1x2:2"]||0)*100}%;background:var(--s2)"></i></div>
-        <div class="row meta" style="margin-top:4px"><span>1 ${pct(pr["1x2:1"])}</span><span>X ${pct(pr["1x2:X"])}</span><span>2 ${pct(pr["1x2:2"])}</span></div>
-      </summary><div class="body">
-        <div class="probs">${PRINCIPALES.filter(([k])=>pr[k]!=null).map(([k,n])=>`<div class="pb">${n}<b>${pct(pr[k])}</b></div>`).join("")}</div>
-        <div class="meta">${p.xg?`xG ${p.xg[0].toFixed(2)} – ${p.xg[1].toFixed(2)} · `:""}${cor?`córners esperados ${(+cor).toFixed(1)} · `:""}${tar?`tarjetas esperadas ${(+tar).toFixed(1)} · `:""}fuentes: ${p.fuentes.map(f=>(FUENTE[f]||[f])[0]).join(", ")}</div>
-        <table style="margin-top:8px"><tr><th>Mejores selecciones</th><th>Prob.</th><th>Mín.</th><th>Valor</th></tr>
-        ${p.selecciones.slice(0,8).map(s=>`<tr><td>${esc(s.nombre)}<br><span class="meta">${esc(s.mercado)} · ${s.n_fuentes} fuentes</span></td><td>${pct(s.p)}</td><td>${c2(s.cuota_minima)}</td><td class="${(s.ev||0)>0?"pos":"neg"}">${s.ev==null?"–":pct(s.ev,1)}</td></tr>`).join("")}</table>
-      </div></details>`}).join("") || `<div class="card empty">Sin partidos con ese filtro.</div>`}`;
-  ligarFiltros(el, vPartidos);
-  $("#busca").oninput = e=>{ busca=e.target.value.toLowerCase(); const pos=e.target.selectionStart; vPartidos(); const b=$("#busca"); b.focus(); b.setSelectionRange(pos,pos) };
-}
-
-// ------------------------------------------------------------ gráfico
-function lineChart(cont, series, opts={}){
-  const W=Math.max(300, Math.round(cont.clientWidth||680)), H=Math.round(Math.min(240, Math.max(180, W*.5))), m={l:44,r:14,t:12,b:26};
-  const all = series.flatMap(s=>s.pts); if(!all.length){ cont.innerHTML=`<div class="empty">Sin datos todavía.</div>`; return }
-  const xs = [...new Set(all.map(p=>p.f))].sort(), xi = Object.fromEntries(xs.map((x,i)=>[x,i]));
-  let lo=Math.min(0,...all.map(p=>p.u)), hi=Math.max(0,...all.map(p=>p.u)); if(hi===lo) hi=lo+1;
-  const pad=(hi-lo)*.08; lo-=pad; hi+=pad;
-  const X=i=>m.l+(xs.length<2?0.5:i/(xs.length-1))*(W-m.l-m.r), Y=v=>m.t+(1-(v-lo)/(hi-lo))*(H-m.t-m.b);
-  const ticks=[]; const step=Math.pow(10,Math.floor(Math.log10((hi-lo)/3))); const st=[1,2,5,10].map(k=>k*step).find(s=>(hi-lo)/s<=5);
-  for(let v=Math.ceil(lo/st)*st; v<=hi; v+=st) ticks.push(+v.toFixed(6));
-  let g = ticks.map(v=>`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1" ${v===0?'':'stroke-dasharray="2 4"'}/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="var(--tx3)">${opts.fmt?opts.fmt(v):v}</text>`).join("");
-  const xl=[0,Math.floor((xs.length-1)/2),xs.length-1].filter((v,i,a)=>a.indexOf(v)===i);
-  g += xl.map(i=>`<text x="${X(i)}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--tx3)">${xs[i].slice(5).split("-").reverse().join("/")}</text>`).join("");
-  g += series.map(s=>`<path d="${s.pts.map((p,j)=>(j?"L":"M")+X(xi[p.f]).toFixed(1)+" "+Y(p.u).toFixed(1)).join("")}" fill="none" stroke="var(${s.color})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join("");
-  if(series.length>1) g += series.map(s=>{ const p=s.pts[s.pts.length-1]; return `<text x="${X(xi[p.f])-4}" y="${Y(p.u)-8}" text-anchor="end" font-size="11.5" font-weight="650" fill="var(--tx2)">${esc(s.name)}</text>` }).join("");
-  cont.innerHTML = (series.length>1? `<div class="legend">${series.map(s=>`<span><span class="dot" style="background:var(${s.color})"></span> ${esc(s.name)}</span>`).join("")}</div>`:"")
-    + `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label||"Gráfico")}">${g}<line class="cx" y1="${m.t}" y2="${H-m.b}" stroke="var(--tx3)" stroke-width="1" visibility="hidden"/>${series.map((s,i)=>`<circle class="cd${i}" r="4.5" fill="var(${s.color})" stroke="var(--raised)" stroke-width="2" visibility="hidden"/>`).join("")}<rect x="${m.l}" y="0" width="${W-m.l-m.r}" height="${H}" fill="transparent" class="hit"/></svg><div class="tip"></div></div>`;
-  const svg=cont.querySelector("svg"), tip=cont.querySelector(".tip"), cx=svg.querySelector(".cx");
-  const mover = ev=>{
-    const r=svg.getBoundingClientRect(), t=(ev.touches?ev.touches[0]:ev), vx=(t.clientX-r.left)/r.width*W;
-    const i=Math.max(0,Math.min(xs.length-1,Math.round((vx-m.l)/(W-m.l-m.r)*(xs.length-1)))), f=xs[i];
-    cx.setAttribute("x1",X(i)); cx.setAttribute("x2",X(i)); cx.setAttribute("visibility","visible");
-    const filas=series.map((s,j)=>{ const p=[...s.pts].reverse().find(p=>p.f<=f); const c=svg.querySelector(".cd"+j);
-      if(p&&p.f===f){ c.setAttribute("cx",X(i)); c.setAttribute("cy",Y(p.u)); c.setAttribute("visibility","visible") } else c.setAttribute("visibility","hidden");
-      return p? `${series.length>1?esc(s.name)+": ":""}${opts.fmt?opts.fmt(p.u):p.u}`:"" }).filter(Boolean);
-    tip.innerHTML=`${f.split("-").reverse().join("/")}<br><b>${filas.join("<br>")}</b>`; tip.style.display="block";
-    tip.style.left=(X(i)/W*r.width)+"px"; tip.style.top=(m.t/H*r.height+18)+"px";
-  };
-  svg.addEventListener("mousemove",mover); svg.addEventListener("touchmove",mover,{passive:true}); svg.addEventListener("touchstart",mover,{passive:true});
-  svg.addEventListener("mouseleave",()=>{ tip.style.display="none"; cx.setAttribute("visibility","hidden"); svg.querySelectorAll("circle").forEach(c=>c.setAttribute("visibility","hidden")) });
-}
-
-// ------------------------------------------------------- RENDIMIENTO
-function vRend(){
-  const el=$("#v-rend"), H=D.hist, r=H&&H.resumen;
-  let h = `<h2 style="margin-top:4px">Tus apuestas</h2>`;
-  if(!r||!r.n){ h += `<div class="card empty">Aún no hay apuestas liquidadas. Los resultados se actualizan solos cada mañana.</div>` }
-  else{
-    h += `<div class="kpis"><div class="kpi"><b>${r.n}</b><span>Apuestas</span></div><div class="kpi"><b>${pct(r.acierto)}</b><span>Acierto</span></div>
-      <div class="kpi"><b class="${r.roi>=0?"pos":"neg"}">${(r.roi*100).toFixed(1)}%</b><span>ROI</span></div><div class="kpi"><b class="${r.neto>=0?"pos":"neg"}">${usd(r.neto)}</b><span>Ganancia neta</span></div></div>
-      <div class="card"><div class="row"><b>Ganancia acumulada</b><span class="meta">USD</span></div><div id="ch-hist"></div>
-      <div class="meta">${r.n<200?`Con ${r.n} apuestas todavía domina la suerte: el ROI es confiable a partir de ~200.`:"Muestra suficiente para evaluar."}</div></div>
-      <div class="card"><table><tr><th>Mercado</th><th>N</th><th>ROI</th><th>Neto</th></tr>
-      ${Object.entries(r.por_mercado||{}).sort((a,b)=>b[1].n-a[1].n).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.n}</td><td class="${v.neto>=0?"pos":"neg"}">${(v.apostado?v.neto/v.apostado*100:0).toFixed(1)}%</td><td class="${v.neto>=0?"pos":"neg"}">${usd(v.neto)}</td></tr>`).join("")}</table></div>`;
-  }
-  const pend = (H?.picks||[]).filter(p=>p.estado==="pendiente" && p.tipo==="valor");
-  h += `<h2>Pendientes (${pend.length})</h2>` + (pend.length? `<div class="card"><table><tr><th>Pick</th><th>Cuota</th><th>Monto</th><th></th></tr>${pend.map(p=>{
-      const k=p.uid+"|"+p.clave, loc=hechos[k];
-      return `<tr><td><b>${esc(p.nombre)}</b><br><span class="meta">${esc(p.local)} vs ${esc(p.visita)} · ${hora(p.inicio)}</span></td>
-      <td>${c2(loc?.cuota ?? p.cuota_tomada ?? p.cuota_minima)}${(loc||p.cuota_tomada)?"":'<br><span class="meta">mín.</span>'}</td><td>$${(+(loc?.monto ?? p.monto)).toFixed(2)}</td>
-      <td>${loc?.estado==="omitida"?'<span class="meta">omitida</span>':`<button class="btn small" data-omit="${esc(k)}">No aposté</button>`}</td></tr>`}).join("")}</table>
-      <div class="meta" style="margin-top:8px">Si no registras la cuota, el sistema asume la cuota mínima. Toca "No aposté" para excluirla de tu rendimiento.</div></div>` : `<div class="card empty">Nada pendiente.</div>`);
-  const liq = (H?.picks||[]).filter(p=>["ganada","perdida","nula"].includes(p.estado) && p.tipo==="valor").slice(0,30);
-  if(liq.length) h += `<h2>Últimas liquidadas</h2><div class="card"><table><tr><th>Pick</th><th>Cuota</th><th>Resultado</th></tr>${liq.map(p=>`<tr><td>${esc(p.nombre)}<br><span class="meta">${esc(p.local)} vs ${esc(p.visita)}</span></td><td>${c2(p.cuota_tomada)}</td><td class="${p.ganancia>0?"pos":p.ganancia<0?"neg":""}">${p.estado==="nula"?"Devuelta":usd(p.ganancia)}</td></tr>`).join("")}</table></div>`;
-
-  // simulación real 30 días
-  const S = D.sim;
-  if(S && S.resumen){
-    const R=S.resumen, fila=(n,r)=>r&&r.n?`<tr><td>${n}</td><td>${r.n}</td><td>${r.ganadas} (${pct(r.acierto)})</td><td>${pct(r.prob_media)}</td><td class="${r.neto>=0?"pos":"neg"}">${usd(r.neto)}</td><td class="${r.roi>=0?"pos":"neg"}">${(r.roi*100).toFixed(1)}%</td></tr>`:"";
-    h += `<h2>Prueba con datos reales: ${esc(S.periodo)}</h2><div class="card">
-      <div class="meta">${S.partidos} partidos reales de las 5 grandes ligas. El sistema decidió cada día solo con información anterior, como si hubiera estado funcionando. El favorito del sistema acertó el 1X2 en <b>${pct(S.acierto_favorito_1x2)}</b> de los partidos.</div>
-      <table style="margin-top:8px"><tr><th>Nivel</th><th>N</th><th>Ganadas</th><th>Prob. esperada</th><th>Neto</th><th>ROI</th></tr>
-      ${fila("Seguras",R.seguras)}${fila("Valor",R.valor)}${fila("Grandes",R.grandes)}</table>
-      <div class="note">Lo importante: <b>el sistema acierta lo que dice</b>. Si dice 80%, gana cerca del 80% de las veces. Ganar dinero depende de la cuota: con la cuota de Ecuabet escrita en la app, solo apuestas cuando paga lo suficiente.</div>
-      <details><summary class="meta" style="cursor:pointer;padding:6px 0">Ver las ${(S.seguras||[]).length} seguras, una por una</summary>
-      <table><tr><th>Día</th><th>Pick</th><th>Prob.</th><th>Res.</th></tr>${(S.seguras||[]).map(x=>`<tr><td>${x.dia.slice(5).split("-").reverse().join("/")}</td><td>${esc(x.pick)}<br><span class="meta">${esc(x.partido)} · ${esc(x.marcador)}</span></td><td>${pct(x.p)}</td><td>${x.resultado==="ganada"?'<span class="ok-ic">✓</span>':'<span class="no-ic">✗</span>'}</td></tr>`).join("")}</table></details>
-      <details><summary class="meta" style="cursor:pointer;padding:6px 0">Ver las ${(S.grandes||[]).length} combinadas, pierna por pierna</summary>
-      ${(S.grandes||[]).map(c=>`<div style="margin:10px 0"><div class="row"><b>${c.dia.slice(5).split("-").reverse().join("/")} · objetivo $${c.objetivo} (cuota ${c.cuota})</b><span class="${c.resultado==="ganada"?"pos":"neg"}">${c.aciertos}/${c.piernas.length}</span></div>
-        ${c.piernas.map(l=>`<div class="meta">${l.acierto?'<span class="ok-ic">✓</span>':'<span class="no-ic">✗</span>'} ${esc(l.pick)} — ${esc(l.partido)} (${pct(l.p)})</div>`).join("")}</div>`).join("")}</details>
-    </div>`;
-  }
-
-  // backtest
-  h += `<h2>Backtest: la estrategia en la temporada pasada</h2>`;
-  const bt = D.bt && D.bt.resultado;
-  if(!bt || !Object.keys(bt).length) h += `<div class="card empty">Aún no se ha corrido. Se calcula solo cada domingo (o desde Ajustes).</div>`;
-  else{
-    const NB={b365:["Casa blanda (Bet365)","--s1","Lo más parecido a Ecuabet"], max:["Mejor cuota del mercado","--s2","Optimista"]};
-    h += `<div class="card"><div class="meta">1 unidad por apuesta, solo con información disponible antes de cada partido (el modelo se reentrena cada semana).</div>
-      <div id="ch-bt"></div>
-      <table style="margin-top:6px"><tr><th></th>${Object.keys(bt).map(f=>`<th>${NB[f]?.[0]||f}</th>`).join("")}</tr>
-      ${[["Apuestas",x=>x.n],["Acierto",x=>pct(x.acierto)],["ROI",x=>`<span class="${x.roi>=0?"pos":"neg"}">${(x.roi*100).toFixed(1)}%</span>`],["Unidades",x=>usd(x.unidades).replace("$","")],
-        ["CLV medio",x=>x.clv==null?"–":`<span class="${x.clv>=0?"pos":"neg"}">${(x.clv*100).toFixed(1)}%</span>`],["Le gana al cierre",x=>pct(x.clv_positivo)],
-        ["Racha perdedora máx.",x=>x.max_racha_perdidas],["Caída máxima",x=>x.max_caida.toFixed(1)+" u"]]
-        .map(([n,f])=>`<tr><td>${n}</td>${Object.values(bt).map(x=>`<td>${f(x)}</td>`).join("")}</tr>`).join("")}</table>
-      <div class="note">El <b>CLV</b> mide si tomaste mejores cuotas que el cierre de Pinnacle. Un CLV positivo sostenido es la señal más confiable de que la ventaja es real, más que el ROI de pocas semanas.</div></div>`;
-  }
-  el.innerHTML = h;
-  if(r&&r.n) lineChart($("#ch-hist"), [{name:"Neto", color:"--s1", pts:H.curva}], {fmt:v=>(v<0?"−$":"$")+Math.abs(v).toFixed(0), label:"Ganancia acumulada"});
-  if(bt && Object.keys(bt).length) lineChart($("#ch-bt"), Object.entries(bt).map(([f,x])=>({name:f==="b365"?"Bet365":"Mejor cuota", color:f==="b365"?"--s1":"--s2", pts:x.curva})), {fmt:v=>v.toFixed(0)+"u", label:"Unidades acumuladas en el backtest"});
-  el.querySelectorAll("[data-omit]").forEach(b=>b.onclick=async()=>{
-    const [uid,...rest]=b.dataset.omit.split("|"), clave=rest.join("|");
-    hechos[b.dataset.omit]={estado:"omitida"}; LS.set("hechos",hechos);
-    await despachar("registrar.yml",{accion:"omitir",uid,clave,cuota:"0",monto:"0"}); vRend(); toast("Marcada como no apostada");
-  });
-}
-
-// ------------------------------------------------------------ FUENTES
-function vFuentes(){
-  const el=$("#v-fuentes"), F=D.fuentes;
-  if(!F){ el.innerHTML=`<div class="card empty">Sin datos.</div>`; return }
-  const orden=["mercado","modelo","forebet","apifootball"];
-  let h = `<div class="note">El sistema mide el error de cada fuente en cada mercado y ajusta solo su peso: la que más acierta pesa más.</div>
-    <h2>Peso actual de cada fuente</h2><div class="card"><div class="legend" style="flex-wrap:wrap">${orden.map(f=>`<span><span class="dot" style="background:var(${FUENTE[f][1]})"></span> ${FUENTE[f][0]}</span>`).join("")}</div>
-    ${Object.entries(F.pesos).map(([fam,w])=>`<div style="margin-top:10px"><div class="row"><span style="font-size:13px">${esc(F.familias[fam]||fam)}</span></div>
-      <div class="wbar" role="img" aria-label="${orden.map(f=>FUENTE[f][0]+" "+pct(w[f])).join(", ")}">${orden.filter(f=>w[f]>0.005).map(f=>`<i style="width:${w[f]*100}%;background:var(${FUENTE[f][1]});color:${["forebet","apifootball"].includes(f)?"#0b0b0b":"#fff"}" title="${FUENTE[f][0]} ${pct(w[f])}">${w[f]>=.12?pct(w[f]):""}</i>`).join("")}</div></div>`).join("")}</div>`;
-  const cal=F.calibracion||[];
-  if(cal.length){
-    const fams=[...new Set(cal.map(c=>c.familia))], fs=[...new Set(cal.map(c=>c.fuente))].sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
-    h += `<h2>Error de cada fuente (Brier: más bajo = mejor)</h2><div class="card" style="overflow-x:auto"><table><tr><th>Mercado</th>${fs.map(f=>`<th>${(FUENTE[f]||[f])[0]}</th>`).join("")}</tr>
-      ${fams.map(fam=>{ const vals=cal.filter(c=>c.familia===fam), best=Math.min(...vals.map(v=>v.brier));
-        return `<tr><td>${esc(F.familias[fam]||fam)}</td>${fs.map(f=>{const c=vals.find(v=>v.fuente===f); return `<td>${c?`<b style="${c.brier===best?"color:var(--good)":""}">${c.brier.toFixed(3)}</b><br><span class="meta">n=${c.n}</span>`:"–"}</td>`}).join("")}</tr>`}).join("")}</table></div>`;
-  } else h += `<div class="card empty">El error se empieza a medir cuando terminan los primeros partidos.</div>`;
-  el.innerHTML=h;
-}
-
-// ------------------------------------------------------------ AJUSTES
-function vAjustes(){
-  const c=cfg();
-  $("#v-ajustes").innerHTML = `
-    <h2 style="margin-top:4px">Conexión con tu sistema</h2><div class="card">
-    <div class="meta">Para registrar apuestas y correr el análisis desde aquí. Solo se guarda en este teléfono.</div>
-    <label class="field"><span>Usuario u organización de GitHub</span><input id="a-owner" value="${esc(ajustes.owner)}" autocomplete="off" autocapitalize="off"></label>
-    <label class="field"><span>Repositorio</span><input id="a-repo" value="${esc(ajustes.repo)}" autocomplete="off" autocapitalize="off"></label>
-    <label class="field"><span>Token de GitHub (permiso Actions: Read and write, solo este repositorio)</span><input id="a-token" type="password" value="${esc(ajustes.token)}" autocomplete="off"></label>
-    <label class="field"><span>Banca para los cálculos de esta pantalla (vacío = la del sistema: $${(+((D.hoy&&D.hoy.config.banca)||100)).toFixed(2)})</span><input id="a-banca" type="number" inputmode="decimal" value="${ajustes.banca??""}"></label>
-    <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start"><button class="btn pri" id="a-guardar">Guardar</button>
-    <button class="btn" id="a-correr">Analizar ahora</button><button class="btn" id="a-bt">Correr backtest</button></div>
-    <div class="meta" style="margin-top:8px">"Analizar ahora" tarda unos 3–5 minutos. Luego toca ↻.</div></div>
-    <h2>Reglas activas</h2><div class="card"><table>
-      <tr><td>Banca</td><td>$${(+c.banca).toFixed(2)}</td></tr><tr><td>Kelly</td><td>${c.fraccion_kelly}</td></tr>
-      <tr><td>Máximo por pick</td><td>${pct(c.stake_max_pct,1)}</td></tr><tr><td>Valor mínimo</td><td>${pct(c.ventaja_minima)}</td></tr>
-      <tr><td>Fuentes mínimas</td><td>${c.min_fuentes??2}</td></tr><tr><td>Desacuerdo máximo</td><td>±${((c.max_dispersion??.08)*100).toFixed(0)} pts</td></tr></table>
-      <div class="meta" style="margin-top:8px">Se cambian en <code>config.yaml</code>.</div></div>
-    <h2>Instalar en el celular</h2><div class="card"><div class="meta">iPhone: Safari → Compartir → <b>Agregar a inicio</b>. Android: Chrome → ⋮ → <b>Instalar app</b>.</div></div>
-    <div class="note">Ningún sistema garantiza ganancias. Apuesta solo dinero que puedas perder. Si apuestas para recuperar pérdidas, para.</div>`;
-  $("#a-guardar").onclick=()=>{ ajustes={owner:$("#a-owner").value.trim(),repo:$("#a-repo").value.trim(),token:$("#a-token").value.trim(),banca:$("#a-banca").value?+$("#a-banca").value:null}; LS.set("ajustes",ajustes); toast("Guardado"); renderTodo() };
-  $("#a-correr").onclick=async()=>{ if(await despachar("diario.yml",{})) toast("Análisis en marcha. Vuelve en unos minutos.") };
-  $("#a-bt").onclick=async()=>{ if(await despachar("backtest.yml",{})) toast("Backtest en marcha (~10 min).") };
-}
-
-// ------------------------------------------------------------- navegación
-const TIT={hoy:"Hoy",partidos:"Partidos",rend:"Rendimiento",fuentes:"Fuentes",ajustes:"Ajustes"};
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
-  Object.keys(TIT).forEach(v=>$("#v-"+v).classList.toggle("hide",v!==b.dataset.v));
-  $("#titulo").textContent=TIT[b.dataset.v]; window.scrollTo(0,0);
-  ({hoy:vHoy,partidos:vPartidos,rend:vRend,fuentes:vFuentes,ajustes:vAjustes})[b.dataset.v](); barra();
-});
-$("#recargar").onclick=()=>{ cargar(); toast("Actualizando…") };
-try{ if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{}) }catch(e){}
-cargar();
-</script>
+<script src="app.js" defer></script>
 </body>
 </html>

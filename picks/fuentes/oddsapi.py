@@ -1,8 +1,9 @@
 """The Odds API: cuotas de casas 'afiladas' (Pinnacle, Betfair...) para 1X2 y goles.
 /events es gratis; /odds cuesta (mercados x regiones) créditos por liga."""
+import time
 from datetime import datetime, timedelta, timezone
 
-import requests
+from .apifootball import peticion_con_reintentos
 
 API = "https://api.the-odds-api.com/v4"
 
@@ -12,23 +13,26 @@ def _iso(dt):
 
 
 class OddsAPI:
-    def __init__(self, clave: str):
+    def __init__(self, clave: str, sleep=time.sleep):
         self.clave = clave
         self.restantes = None
+        self.sleep = sleep
 
     @property
     def activa(self):
         return bool(self.clave)
 
     def _get(self, ruta, **params):
+        """Nunca lanza por fallos HTTP/red: reintenta y degrada a [] (sin caché)."""
         params["apiKey"] = self.clave
-        r = requests.get(API + ruta, params=params, timeout=30)
-        if r.status_code in (401, 422, 429):
-            print(f"  ! The Odds API {ruta}: {r.status_code}")
+        r = peticion_con_reintentos(API + ruta, params, None, self.sleep, etiqueta=f"The Odds API {ruta}")
+        if r is None:
             return []
-        r.raise_for_status()
         self.restantes = r.headers.get("x-requests-remaining", self.restantes)
-        return r.json()
+        try:
+            return r.json()
+        except ValueError:
+            return []
 
     def deportes(self):
         return self._get("/sports", all="true")

@@ -2,7 +2,7 @@
 (Forebet bloquea las consultas automáticas directas). Costo aprox.: USD 0.10 por 1 000 partidos."""
 import json
 import time
-from datetime import date, timedelta
+from datetime import timedelta
 
 import requests
 
@@ -57,13 +57,15 @@ class Forebet:
         """Lista de {local, visita, fecha, probs} para hoy y mañana (cache 6 h)."""
         if not self.activa:
             return []
-        cache = DATOS / "cache" / f"forebet_{date.today()}.json"
+        from ..pipeline import hoy_ec  # import tardío: pipeline importa fuentes
+        hoy = hoy_ec()
+        cache = DATOS / "cache" / f"forebet_{hoy}.json"
         cache.parent.mkdir(exist_ok=True)
         if cache.exists() and time.time() - cache.stat().st_mtime < 6 * 3600:
             filas = json.loads(cache.read_text())
         else:
             entrada = {"matchScope": "byDate", "predictionMarkets": MERCADOS,
-                       "startDate": str(date.today()), "endDate": str(date.today() + timedelta(days=dias - 1)),
+                       "startDate": str(hoy), "endDate": str(hoy + timedelta(days=dias - 1)),
                        "countries": self.paises, "leagues": [], "maxResults": 0}
             try:
                 r = requests.post(URL, params={"token": self.token, "timeout": 280}, json=entrada, timeout=300)
