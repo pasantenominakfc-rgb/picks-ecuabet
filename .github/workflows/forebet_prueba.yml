@@ -4,6 +4,13 @@ name: Prueba de Forebet (diagnóstico)
 # y muestra estado, campos y cuotas. No imprime el token.
 on:
   workflow_dispatch:
+    inputs:
+      actor:
+        description: 'Actor de Apify (usuario~nombre)'
+        default: 'solidcode~forebet-scraper'
+      entrada:
+        description: 'Entrada JSON del actor'
+        default: '{}'
 
 permissions:
   contents: read
@@ -16,6 +23,8 @@ jobs:
       - name: Lanzar, esperar y mostrar la estructura
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          ACTOR: ${{ inputs.actor }}
+          ENTRADA: ${{ inputs.entrada }}
         run: |
           python3 - <<'PY'
           import json, os, sys, time, urllib.request, urllib.error
@@ -32,11 +41,13 @@ jobs:
                       return json.load(r)
               except urllib.error.HTTPError as e:
                   print("HTTP", e.code, ruta.split("?")[0], e.read().decode("utf-8", "replace")[:300].replace(tok, "***")); sys.exit(1)
-          hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
-          entrada = {"matchScope": "topTips",
-                     "predictionMarkets": ["match1x2", "underOver25", "bothTeamsToScore"],
-                     "countries": [], "leagues": [], "maxResults": 10}
-          run = api("POST", "/acts/solidcode~forebet-scraper/runs", entrada)["data"]
+          import re
+          actor = os.environ["ACTOR"]
+          if not re.fullmatch(r"[\w.-]+~[\w.-]+", actor):
+              print("actor invalido"); sys.exit(1)
+          entrada = json.loads(os.environ["ENTRADA"] or "{}")
+          print("actor:", actor, "| entrada:", json.dumps(entrada)[:200])
+          run = api("POST", "/acts/" + actor + "/runs", entrada)["data"]
           print("run lanzado, estado:", run.get("status"))
           t0 = time.time()
           while run.get("status") not in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT") and time.time() - t0 < 480:
