@@ -109,10 +109,12 @@ dias_adelante: 1
 # de ligas menores; prioriza el orden de `ligas:` y luego el resto (por defecto 25 en gratis, sin tope en pro).
 max_ligas_analizadas: 25
 # The Odds API gratis = 500 créditos/mes. Cada liga consultada cuesta ~2 créditos (h2h + totals, 1 región):
-# 2 corridas/día x 4 llamadas x ~2 créditos x 30 días ~ 480 créditos/mes. Tope de ligas consultadas POR CORRIDA
+# 8 llamadas x ~2 créditos x 30 días ~ 480 créditos/mes: la 2.ª corrida del día reutiliza el caché de la 1.ª (12 h), así
+# que en la práctica se gasta una vez al día. Si el caché fallara, la reserva de 5 créditos corta sin romper nada.
+# Tope de ligas consultadas POR CORRIDA
 # (primero las que juegan hoy, luego el orden de `ligas:`); resultados en caché 12 horas (la 2.ª corrida del día
 # reutiliza la 1.ª). Nombre anterior `odds_max_llamadas_dia`: se sigue aceptando por compatibilidad.
-odds_max_llamadas_corrida: 4
+odds_max_llamadas_corrida: 8
 max_picks_dia: 8              # por cada día
 
 # --- Ligas ------------------------------------------------------------------
