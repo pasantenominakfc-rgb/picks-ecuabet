@@ -105,6 +105,11 @@ def agregar_picks(picks: list[dict], tipo: str = "valor"):
                       (hoy, tipo, s["uid"], s["af_id"], s["liga"], s["inicio"], s["local"], s["visita"], s["clave"],
                        s["nombre"], s["p"], s["p_push"], s["cuota_justa"], s["cuota_minima"],
                        s.get("cuota_ecuabet"), s.get("monto", 0.0)))
+            # una corrida posterior puede reclasificar (p. ej. 07:00 Loca -> 13:00 Valor) mientras NO esté registrado
+            c.execute("""UPDATE picks SET tipo=?, nombre=?, p=?, p_push=?, cuota_justa=?, cuota_minima=?, cuota_tomada=?, monto=?
+                         WHERE uid=? AND clave=? AND registrado=0 AND estado='pendiente'""",
+                      (tipo, s["nombre"], s["p"], s["p_push"], s["cuota_justa"], s["cuota_minima"],
+                       s.get("cuota_ecuabet"), s.get("monto", 0.0), s["uid"], s["clave"]))
 
 
 def _estado(pid: int) -> str | None:

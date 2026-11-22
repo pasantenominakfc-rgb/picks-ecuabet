@@ -5,6 +5,8 @@ import time
 import pandas as pd
 import requests
 
+from ..errores import describir
+
 from ..config import DATOS
 
 BASE = "https://www.football-data.co.uk"
@@ -29,7 +31,7 @@ def _bajar(url: str, cache: str, horas: float = 12) -> str | None:
         ruta.write_bytes(r.content)
         return r.content.decode("latin-1")
     except Exception as e:  # noqa: BLE001
-        print(f"  ! football-data {url}: {e}")
+        print(f"  ! football-data {url}: {describir(e)}")
         return ruta.read_text(encoding="latin-1") if ruta.exists() else None
 
 

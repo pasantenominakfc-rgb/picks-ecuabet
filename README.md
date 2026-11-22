@@ -103,7 +103,7 @@ Los workflows se niegan a continuar si encuentran un `sistema.db` en claro en la
 ## Ligas y fechas
 
 - **Perfil activo (plan gratis): 11 ligas** (LigaPro, Champions, Europa League, Premier, LaLiga, Serie A,
-  Bundesliga, Ligue 1, Libertadores, Sudamericana, MLS), hoy +2 días, `max_predicciones_af: 10`. Si la cuota
+  Bundesliga, Ligue 1, Libertadores, Sudamericana, MLS), hoy +1 día, `max_predicciones_af: 10`. Si la cuota
   diaria de la API se agota, la web muestra un aviso. El perfil completo está documentado como `perfil_pro`
   en `config.yaml` (hay que cambiar a mano los valores indicados y pasar `ligas_extra` a `ligas`).
 - **Más de 40 ligas disponibles (perfil pro):**
@@ -111,7 +111,7 @@ Los workflows se niegan a continuar si encuentran un `sistema.db` en claro en la
   - Norte y Centroamérica: MLS, Liga MX y Concacaf.
   - Sudamérica: LigaPro, Brasil A y B, Argentina, Colombia, Chile, Perú, Uruguay, Paraguay, Bolivia, Venezuela, Libertadores y Sudamericana.
 - **Modo "todas las ligas"** (perfil pro, `incluir_todas_las_ligas: true`): además de la lista, analiza cualquier liga de Europa, Norteamérica y Sudamérica que tenga partidos esas fechas.
-- **Fechas:** el perfil gratis analiza hoy +2 días (`dias_adelante: 2`); el pro, hasta +5. En la app eliges el día y filtras por región y por liga.
+- **Fechas:** el perfil gratis analiza hoy +1 día (`dias_adelante: 1`; el plan gratis de API-Football solo sirve [ayer, mañana]); el pro, hasta +5. En la app eliges el día y filtras por región y por liga.
 - Con tantas ligas se usan muchas consultas: el plan **Pro de API-Football** (USD 19/mes, 7 500 consultas/día) es lo recomendado.
 
 ## Los tres niveles de la app
@@ -121,6 +121,8 @@ Los workflows se niegan a continuar si encuentran un `sistema.db` en claro en la
 | ✅ **Seguras** | Simples con probabilidad ≥ 72% y cuota 1.25–1.60. La cuota es la **estimada de Ecuabet** (justa × 0.94) hasta que anotes la real | 2% de la banca |
 | 💎 **Valor** | La cuota paga más de lo que vale. Exige consenso de ≥ 2 fuentes | Kelly 1/4, tope 3% por pick y 10% por día |
 | 🚀 **Grandes** | Combinadas con objetivo de cobro de $100, $200 o $500 (`grandes_objetivos`, con `grandes_monto` de $5). Se muestra la ganancia neta y el cobro total | Lo que quieras arriesgar |
+| ⚡ **Locas** | **ALTO RIESGO.** Simples de cuota alta (3 a 12) con probabilidad >= 12% y valor esperado >= 10%, solo con cuota REAL de casas (sin ella no hay Locas) y con el mismo consenso de fuentes que Valor. Stake mínimo (0,5% de la banca), máx. 3 al día y 1,5% de la banca en total (`locas_*` en config.yaml). Se pierden la mayoría de las veces | Muy poco; es dinero que puedes perder |
+| 🎟️ **Combinadas** | Combinadas candidatas (cuota total 3 a 60, prob. >= 5%, máx. 10 al día) con las mismas reglas de piernas que Grandes, sin objetivo de cobro | Poco |
 
 Los resultados de los mercados de resultado se liquidan a los **90 minutos** (sin prórroga).
 
@@ -164,17 +166,19 @@ tomar cuotas que paguen lo suficiente, y por eso la app te pide la cuota de Ecua
 
 ## Cómo decide (y por qué el error es bajo)
 
-- **5 fuentes + IA.** (La IA ajusta la probabilidad pero no cuenta como fuente para el consenso.)
+- **6 fuentes + IA.** (La IA ajusta la probabilidad pero no cuenta como fuente para el consenso.)
   - El mercado: cuotas sin el margen de la casa.
   - Modelos propios: Dixon-Coles y binomial negativa para córners y tarjetas.
   - penaltyblog: Poisson bivariado, una librería de código abierto muy usada.
-  - Forebet.
+  - Forebet (requiere `APIFY_TOKEN`; sin él no hay esta fuente).
+  - ClubElo: ratings Elo públicos y gratis (sin clave, sobre todo Europa) convertidos a 1X2, doble oportunidad y DNB (ventaja local +65 Elo, empate calibrable en `config.yaml`: `elo_*`). Solo se calcula para ligas de Europa (en otras regiones hay homónimos: Barcelona SC, Atletico-MG...) y no empareja nombres con sufijos ambiguos (SC, MG, RJ, SP, EC, SE, CA). Entra al ensamble y a la dispersión, pero NO es independiente de los modelos de goles a efectos del consenso: `elo`, `modelo` y `penaltyblog` forman UN solo grupo estadístico (cuentan 1 en conjunto). Si no encuentra a los dos equipos, simplemente no opina. Se descarta la fuente entera si el CSV trae menos de 100 clubes o algún Elo fuera de 800-2300. Los alias de nombres (`ALIAS_ELO`) son suposiciones no verificadas contra el servidor real (devolvía 502).
+  - Cuotas de casas: requieren `ODDS_API_KEY`.
   - API-Football.
   - IA con Groq.
 - **Pesos que aprenden solos.** Cada día se mide el error de cada fuente en cada
   mercado, y la que más se equivoca pierde peso. Lo ves en la pestaña **Fuentes**.
 - **Consenso obligatorio (solo en Valor).**
-  - Opinan al menos 2 fuentes (la IA no cuenta).
+  - Opinan al menos 2 fuentes independientes (la IA no cuenta; `elo`+`modelo`+`penaltyblog` cuentan como UNA en conjunto), y para Valor al menos una de ellas debe ser externa al grupo estadístico: mercado, Forebet o API-Football.
   - La diferencia entre ellas es de 8 puntos o menos.
   - 2 de cada 3 ven valor.
   - El valor esperado es de +4% o más.
@@ -239,3 +243,11 @@ pesos necesitan unas 150 muestras por mercado, y el ROI solo dice algo a partir 
 ~200 apuestas. Úsalo 2–4 semanas registrando picks con montos mínimos y mira el
 backtest y el CLV. Rachas de 8–12 fallos seguidos son normales. Si apuestas para
 recuperar pérdidas, para.
+
+
+## Forebet (Apify) asíncrono y cuotas de referencia
+- El actor `solidcode/forebet-scraper` es lento: se lanza con `POST /runs` y se sondea cada ~10 s hasta que termine o hasta `forebet_espera_max_seg` (480 s = 8 min). Si se agota, se aborta el run y el análisis sigue sin Forebet (el fallo no se cachea; el éxito sí, 6 h). El token va solo en la cabecera `Authorization`.
+- De cada partido se exportan en `hoy.json` (`partidos[].forebet_ctx`) forma, posición, tendencia, marcador previsto, goles promedio, valor % y clima, **solo informativos** (no cambian probabilidades).
+- Las **cuotas de Forebet** (`cuotas_ref`) son una **REFERENCIA ESTIMADA**: la casa no se nombra y no son de Ecuabet. No entran a `mercado`, no cuentan como fuente y no sirven para calcular el valor.
+- Locas: con el stake mínimo (`stake_minimo` = 1) y 1,5% de exposición diaria, una banca de 100 admite 1 Loca al día y de 200 o más, 3; si no cabe ninguna, el motor lo avisa en el log. Un partido con pick de Valor, Alta o Seguras no recibe Loca; las Combinadas no repiten las piernas de las Grandes.
+- Locas y Combinadas se exportan como `dias[fecha].locas` y `dias[fecha].combinadas`.

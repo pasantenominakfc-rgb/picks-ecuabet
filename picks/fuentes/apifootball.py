@@ -4,6 +4,7 @@ import json
 import re
 import time
 from collections import deque
+from datetime import date, timedelta
 
 import pandas as pd
 import requests
@@ -106,6 +107,78 @@ class APIFootball:
         self.sleep, self.reloj, self.max_por_minuto = sleep, reloj, max_por_minuto
         self.cuota_agotada = False       # el servidor avisó que se acabó la cuota diaria
         self._marcas = deque()           # instantes de las últimas peticiones (limitador)
+        # --- límites del plan GRATIS (se aprenden de los mensajes "Free plans do not have access...") ---
+        self.plan_gratis = False
+        self.rango_fechas = None         # (date, date): fechas permitidas para /fixtures?date=
+        self.rango_temp_odds = None      # (int, int): temporadas permitidas para /odds
+        self.rango_temp_fixtures = None  # (int, int): temporadas permitidas para /fixtures?season=
+        self.temporadas_sin_cuotas = set()
+        self.cuotas_no_disponibles = False
+        self.rutas_bloqueadas = set()    # rutas con mensaje "free plans" que no se pudo parsear: no se repiten
+
+    def configurar_plan(self, plan: str, hoy: date):
+        """plan 'gratis': /fixtures solo admite [ayer, mañana]; se fija el rango sin gastar una llamada para descubrirlo.
+        Reinicia lo aprendido en corridas/planes anteriores (rangos, temporadas sin cuotas, rutas bloqueadas): al
+        cambiar de plan o de día esas limitaciones ya no son válidas y se vuelven a aprender si aplican."""
+        self.rango_fechas = self.rango_temp_odds = self.rango_temp_fixtures = None
+        self.temporadas_sin_cuotas = set()
+        self.cuotas_no_disponibles = False
+        self.rutas_bloqueadas = set()
+        self.plan_gratis = (plan or "").strip().lower() == "gratis"
+        if self.plan_gratis:
+            self.rango_fechas = (hoy - timedelta(days=1), hoy + timedelta(days=1))
+
+    def _fecha_permitida(self, fecha: str) -> bool:
+        if not self.rango_fechas:
+            return True
+        try:
+            return self.rango_fechas[0] <= date.fromisoformat(fecha) <= self.rango_fechas[1]
+        except ValueError:
+            return True
+
+    @staticmethod
+    def _temp_permitida(rango, temporada) -> bool:
+        try:
+            return rango is None or rango[0] <= int(temporada) <= rango[1]
+        except (TypeError, ValueError):
+            return True
+
+    def _aprender_plan(self, ruta: str, params: dict, errores) -> bool:
+        """Si el error es de plan gratis, recuerda el rango permitido (sin repetir la llamada). True si lo era."""
+        txt = json.dumps(errores)
+        if "free plan" not in txt.lower():
+            return False
+        m = re.search(r"try from (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})", txt)
+        if m and "date" in txt.lower():
+            try:
+                self.rango_fechas = (date.fromisoformat(m.group(1)), date.fromisoformat(m.group(2)))
+                return True
+            except ValueError:       # fecha imposible en el mensaje: se trata como no parseable
+                pass
+        m = re.search(r"try from (\d{4}) to (\d{4})", txt)
+        if m and "season" in txt.lower():
+            rango = (int(m.group(1)), int(m.group(2)))
+            if ruta == "/odds":
+                self.rango_temp_odds = rango
+                self.cuotas_no_disponibles = True
+                if params.get("season") is not None:
+                    self.temporadas_sin_cuotas.add(int(params["season"]))
+            else:
+                self.rango_temp_fixtures = rango
+            return True
+        # "Free plans" sin rango que sepamos leer: se imprime UNA vez y se corta la ruta (no gastar más llamadas)
+        if ruta not in self.rutas_bloqueadas:
+            print(f"  ! API-Football {ruta} (límite del plan gratis, no parseable): {errores}")
+            self.rutas_bloqueadas.add(ruta)
+        return True
+
+    def resumen_plan(self) -> str | None:
+        """Una sola línea legible por corrida (en vez de decenas de errores repetidos)."""
+        if not self.cuotas_no_disponibles:
+            return None
+        temps = ", ".join(str(t) for t in sorted(self.temporadas_sin_cuotas)) or "actual"
+        return (f"Plan gratis: sin cuotas de API-Football para la temporada {temps}; "
+                "usa ODDS_API_KEY para cuotas")
 
     @property
     def activa(self) -> bool:
@@ -135,7 +208,7 @@ class APIFootball:
         nombre.parent.mkdir(exist_ok=True)
         if cache_horas and nombre.exists() and time.time() - nombre.stat().st_mtime < cache_horas * 3600:
             return json.loads(nombre.read_text())
-        if not self.activa:
+        if not self.activa or ruta in self.rutas_bloqueadas:
             return dict(VACIO)
         for espera_rl in range(self.REINTENTOS_RATE_LIMIT + 1):
             # cada intento real (también los reintentos por 5xx/429/timeout) pasa por el limitador de cupo
@@ -153,6 +226,8 @@ class APIFootball:
             errores = datos.get("errors")
             if not errores:
                 break
+            if self._aprender_plan(ruta, params, errores):
+                return dict(VACIO)               # límite del plan: se recuerda y no se repite (sin ruido en el log)
             print(f"  ! API-Football {ruta}: {errores}")
             txt = json.dumps(errores).lower()
             if "request limit" in txt or (isinstance(errores, dict) and "requests" in errores):
@@ -190,12 +265,16 @@ class APIFootball:
 
     def partidos(self, fecha: str, ligas: set[int] | None = None, tz: str = "America/Guayaquil") -> list[dict]:
         """Partidos de una fecha (hora de Ecuador). ligas=None devuelve todos."""
+        if not self._fecha_permitida(fecha):
+            return []
         d = self._get("/fixtures", cache_horas=1, date=fecha, timezone=tz)
         return [self._fixture(f) for f in d.get("response", []) if ligas is None or f["league"]["id"] in ligas]
 
     def historico(self, liga: int, temporada: int) -> pd.DataFrame:
         filas = []
         for t in (temporada, temporada - 1):
+            if not self._temp_permitida(self.rango_temp_fixtures, t):
+                continue
             d = self._get("/fixtures", cache_horas=20, league=liga, season=t, status="FT")
             filas += [self._fixture(f) for f in d.get("response", [])]
         if not filas:
@@ -208,6 +287,10 @@ class APIFootball:
     def cuotas_liga(self, liga: int, temporada: int, fecha: str, tz: str = "America/Guayaquil") -> dict[int, dict[str, dict[str, float]]]:
         """{fixture_id: {casa: {clave: cuota}}} para todos los partidos de esa liga y fecha."""
         salida, pagina, total = {}, 1, 1
+        if not self._temp_permitida(self.rango_temp_odds, temporada):
+            self.temporadas_sin_cuotas.add(int(temporada))
+            self.cuotas_no_disponibles = True
+            return salida
         while pagina <= total:
             d = self._get("/odds", cache_horas=2, league=liga, season=temporada, date=fecha, page=pagina, timezone=tz)
             total = d.get("paging", {}).get("total", 1)

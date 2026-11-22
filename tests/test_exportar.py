@@ -54,7 +54,7 @@ def _datos_hoy(p=0.6):
                "probs": {"1x2:1": {"p": p}}, "evaluadas": [pick]}
     grande = {"objetivo": 100, "monto": 5.0, "ganancia": 100.0, "cuota": 20.0, "p": 0.04, "ev": -0.2,
               "ev_estimado": -0.2, "cuota_es_estimada": True, "pago": 100.0, "piernas": [pick]}
-    dias = {"2026-11-22": {"valor": [pick], "alta": [], "seguras": [pick], "grandes": [grande]}}
+    dias = {"2026-11-22": {"valor": [pick], "alta": [], "seguras": [pick], "grandes": [grande], "locas": [pick], "combinadas": [grande]}}
     return [partido], dias
 
 
@@ -212,7 +212,7 @@ def _exportado_hoy(aislado):
 
 def test_contrato_picks_web(aislado):
     d = _exportado_hoy(aislado)
-    producidas = _claves(d["seguras"]) | _claves(d["valor"])
+    producidas = _claves(d["seguras"]) | _claves(d["valor"]) | _claves(d["locas"])
     necesarias = {"p_push", "p", "inicio", "detalle", "pesos", "ia", "cuota_es_estimada", "cuota_ecuabet",
                   "cuota_minima", "cuota_justa", "confirmado", "mejor_cuota", "mejor_casa", "ev", "tipo_cuota",
                   "cuota_est", "liga", "mercado", "local", "visita", "nombre", "uid", "clave", "n_fuentes"}

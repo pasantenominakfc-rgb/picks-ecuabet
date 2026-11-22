@@ -88,12 +88,56 @@ function etiquetaFecha(f, hoy){
   if(dd===0) return "Hoy"; if(dd===1) return "Mañana";
   const d = new Date(f+"T12:00:00Z"); return DIAS[d.getUTCDay()]+" "+d.getUTCDate();
 }
+// Niveles de la pestaña Hoy (chips). "todos" muestra todas las secciones.
+const NIVELES_ORDEN = [["todos","Todos"],["seguras","Seguras"],["valor","Valor"],["grandes","Grandes"],["combinadas","Combinadas"],["locas","Locas"]];
+const NIVELES = NIVELES_ORDEN.map(x=>x[0]);
+const nivelValido = (n, d="seguras") => NIVELES.includes(n) ? n : d;
+const seccionesDe = n => n==="todos" ? ["seguras","valor","locas","grandes","combinadas"] : [n];
+const AVISO_LOCAS = "Alto riesgo: probabilidad baja. Apuesta poco (≈0,5% de la banca). Puede perderse la mayoría de las veces.";
+const valorLike = t => t==="valor" || t==="locas";
+// Monto de una Loca (solo local, nunca se envía la banca): si el pick trae `stake` (fracción de la banca, 0<stake<1) se usa,
+// con mínimo y tope por pick; si no, el Kelly de evalCuota. r = resultado de evalCuota (o null sin cuota).
+function montoLoca(s, r, c){
+  if(!r || !r.ok) return {monto:0, insuf:!!(r&&r.insuf)};
+  const tope = c.stake_max_pct*c.banca;
+  if(c.stake_minimo > tope + 1e-9) return {monto:0, insuf:true};
+  const st = +s.stake;
+  if(isFinite(st) && st>0 && st<1) return {monto:Math.min(Math.max(c.stake_minimo, Math.round(st*c.banca*4)/4), tope), insuf:false};
+  return {monto:r.monto, insuf:false};
+}
+// Forma reciente de Forebet: "WDLWW" / "GEPGG" (con o sin separadores) -> ["V","E","D",...]; null si no se reconoce (se muestra como texto).
+function formaChips(t){
+  if(t==null) return null;
+  const x = String(t).toUpperCase().replace(/[\s,;\-–·\/|]+/g,"");
+  if(!x || x.length>12 || !/^[WDLGEP]+$/.test(x)) return null;
+  return [...x].map(c=>({W:"V",G:"V",D:"E",E:"E",L:"D",P:"D"}[c]));
+}
 // </PURAS>
+
+// ---- tema (claro / oscuro / automático): se guarda en localStorage y se aplica con data-tema en <html> (sin scripts inline)
+const TEMAS = ["auto","claro","oscuro"], TEMA_BG = {claro:"#F3F5F8", oscuro:"#0A101C"};
+let tema = TEMAS.includes(LS.get("tema","auto")) ? LS.get("tema","auto") : "auto";
+function aplicarTema(){
+  const r = document.documentElement;
+  if(tema==="auto") r.removeAttribute("data-tema"); else r.setAttribute("data-tema", tema);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{
+    if(!m.dataset.orig) m.dataset.orig = m.getAttribute("content");
+    m.setAttribute("content", tema==="auto" ? m.dataset.orig : TEMA_BG[tema]);
+  });
+}
+aplicarTema();
 
 let nivel = LS.get("nivel","seguras");
 let fechaSel = null, regionSel = "Todas", ligaSel = "Todas";
+let buscaRaw = "", busca = "";          // texto tecleado y su forma normalizada (sin tildes, minúsculas)
+const LIM0 = 20, lim = {h: LIM0, p: LIM0};   // cuántos elementos se pintan; "Ver más" suma LIM0
+const norm = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim();
+const _nc = new WeakMap();
+function textoEquipos(x){ let t=_nc.get(x); if(t===undefined){ t=norm((x.local||"")+" "+(x.visita||"")); _nc.set(x,t) } return t }
 const pasaFiltro = x => (regionSel==="Todas" || x.region===regionSel) && (ligaSel==="Todas" || x.liga===ligaSel);
-const FUENTE = {mercado:["Mercado","--s1"], modelo:["Modelo","--s2"], forebet:["Forebet","--s3"], apifootball:["API-Football","--s4"], penaltyblog:["penaltyblog","--s5"], ia:["IA (Groq)","--s6"], ensamble:["Combinado","--tx2"]};
+const pasaBusca = x => !busca || textoEquipos(x).includes(busca);
+const FUENTE = {mercado:["Mercado","--s1"], modelo:["Modelo","--s2"], forebet:["Forebet","--s3"], apifootball:["API-Football","--s4"], penaltyblog:["penaltyblog","--s5"], elo:["Elo (ClubElo)","--s6"], ia:["IA (Groq)","--s6"], ensamble:["Combinado","--tx2"]};
+const finfo = f => Object.hasOwn(FUENTE, f) ? FUENTE[f] : [String(f),"--tx3"];
 const $ = s => document.querySelector(s);
 const usdn = x => x==null||!isFinite(+x)? "–" : "$"+(+x).toFixed(2);
 const fmtU = x => x==null||!isFinite(+x)? "–" : (x<0?"−":"+")+Math.abs(x).toFixed(2)+" u";
@@ -101,46 +145,113 @@ const usd = x => x==null||!isFinite(+x)? "–" : (x<0?"−":"+")+"$"+Math.abs(x)
 const ddmm = s => String(s||"").slice(5).split("-").reverse().join("/");
 const tabla = html => `<div class="tw">${html}</div>`;
 const key = (s, t) => t+"|"+s.uid+"|"+s.clave;
+// formateadores reutilizados (crear Intl en cada tarjeta es lento con ~100 partidos)
+const F_WD = new Intl.DateTimeFormat("es-EC",{weekday:"short",timeZone:TZ});
+const F_HM = new Intl.DateTimeFormat("es-EC",{hour:"2-digit",minute:"2-digit",hourCycle:"h23",timeZone:TZ});
+function horaCorta(iso){ const d = new Date(iso); return isNaN(d) ? "–" : F_HM.format(d) }
 function hora(iso){
   const d = new Date(iso); if(isNaN(d)) return "–";
-  const w = d.toLocaleDateString("es-EC",{weekday:"short",timeZone:TZ}).replace(".","");
-  return w.charAt(0).toUpperCase()+w.slice(1)+" "+d.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:TZ});
+  const w = F_WD.format(d).replace(".","");
+  return w.charAt(0).toUpperCase()+w.slice(1)+" "+F_HM.format(d);
+}
+// <COPIA>
+// Texto para copiar al portapapeles. No contiene códigos de cupón: Ecuabet no tiene API y el código lo genera el usuario en su web.
+const F_FULL = new Intl.DateTimeFormat("es-EC",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23",timeZone:TZ});
+function fechaHoraTxt(iso){
+  const d = new Date(iso); if(isNaN(d)) return "–";
+  const p = {}; for(const x of F_FULL.formatToParts(d)) p[x.type] = x.value;
+  return [p.weekday, p.day, p.month].map(v=>String(v||"").replace(/\./g,"").toLowerCase()).join(" ")+" "+p.hour+":"+p.minute;
+}
+const una = x => String(x ?? "").replace(/[\r\n]+/g," ");
+function textoPick(s, minimo){
+  s = {...s, local: una(s.local), visita: una(s.visita), nombre: una(s.nombre)};
+  const m = (minimo!=null && isFinite(+minimo)) ? ` · Cuota mínima: ${c2(minimo)}` : "";
+  return `${s.local} vs ${s.visita} · ${fechaHoraTxt(s.inicio)} (hora Ecuador)\nMercado: ${s.nombre}${m}`;
+}
+function textoCombinada(c){
+  const L = (c.piernas || []).map(s=>({...s, local: una(s.local), visita: una(s.visita), nombre: una(s.nombre)}));
+  const filas = L.map((s,i)=>`${i+1}. ${s.local} vs ${s.visita} · ${fechaHoraTxt(s.inicio)} (hora Ecuador) · Mercado: ${s.nombre}${isFinite(+s.cuota_est)?` · Cuota ~${c2(s.cuota_est)} (estimada)`:""}`);
+  const t = isFinite(+c.cuota) ? `\nCuota total: ${c2(c.cuota)}` : "";
+  return `Combinada de ${L.length} selecciones\n${filas.join("\n")}${t}`;
+}
+// </COPIA>
+const ICONO = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+function avisoHTML(tipo, icono, titulo, texto, rol){
+  return `<div class="aviso ${tipo}"${rol?` role="${rol}"`:""}>${ICONO(icono)}<div><b>${esc(titulo)}</b>${texto?esc(texto):""}</div></div>`;
+}
+async function copiar(texto){
+  let ok = false;
+  try{ if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(texto); ok = true } }catch(e){}
+  if(!ok){   // respaldo: textarea + execCommand (navegadores sin permiso de portapapeles)
+    try{
+      const t = document.createElement("textarea");
+      t.value = texto; t.setAttribute("readonly",""); t.setAttribute("aria-hidden","true");
+      t.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";
+      document.body.appendChild(t); t.select(); t.setSelectionRange(0, texto.length);
+      ok = document.execCommand("copy"); t.remove();
+    }catch(e){ ok = false }
+  }
+  toast(ok ? "Copiado" : "No se pudo copiar", !ok);
+  return ok;
 }
 const yaEmpezo = (s, now=Date.now()) => { const t = Date.parse(s.inicio); return isFinite(t) && t <= now };
 function toast(t, err, ms){ const el=$("#toast"); el.textContent=t; el.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>el.style.display="none", ms||(err?6000:2600)) }
-
 // ------------------------------------------------------------- días y filtros
 function dia(){
-  const vacio = {valor:[], alta:[], seguras:[], grandes:[], pool:[], combinada:null, ocultos:0};
+  const vacio = {valor:[], alta:[], seguras:[], locas:[], grandes:[], combinadas:[], combSinDato:true, pool:[], combinada:null, ocultos:0};
   if(!D.hoy) return vacio;
   const fs = fechasVigentes(D.hoy.fechas, hoyEC());
   if(!fs.length) return vacio;
   if(!fechaSel || !fs.includes(fechaSel)) fechaSel = fs[0];
   const d = D.hoy.dias[fechaSel]; if(!d) return vacio;
-  const now = Date.now(), vivo = x => !yaEmpezo(x, now), f = a => (a||[]).filter(x=>pasaFiltro(x) && vivo(x));
-  const ocultos = [].concat(d.valor||[], d.alta||[], d.seguras||[]).filter(x=>yaEmpezo(x, now)).length;
-  return {valor:f(d.valor), alta:f(d.alta), seguras:f(d.seguras), pool:f(d.pool), combinada:d.combinada, ocultos,
-          grandes:(d.grandes||[]).filter(c=>(c.piernas||[]).length && c.piernas.every(x=>pasaFiltro(x) && vivo(x)))};
+  const now = Date.now(), vivo = x => !yaEmpezo(x, now), f = a => (a||[]).filter(x=>pasaFiltro(x) && pasaBusca(x) && vivo(x));
+  const ocultos = [].concat(d.valor||[], d.alta||[], d.seguras||[], d.locas||[]).filter(x=>yaEmpezo(x, now)).length;
+  // el pool (armador de combinadas) solo respeta región/liga: la búsqueda por equipo no debe vaciarlo
+  const cb = a => (a||[]).filter(c=>(c.piernas||[]).length && c.piernas.every(x=>pasaFiltro(x) && vivo(x)) && c.piernas.some(pasaBusca));
+  return {valor:f(d.valor), alta:f(d.alta), seguras:f(d.seguras), locas:f(d.locas), combinadas:cb(d.combinadas), combSinDato:!Array.isArray(d.combinadas), pool:(d.pool||[]).filter(x=>pasaFiltro(x) && vivo(x)), combinada:d.combinada, ocultos,
+          grandes:cb(d.grandes)};
 }
-function barraFiltros(){
+// Fechas + selectores de región y liga. pref = "h" (Hoy) o "p" (Partidos): ids únicos por vista.
+function filtrosHTML(pref){
   if(!D.hoy) return "";
   const hoy = hoyEC(), fs = fechasVigentes(D.hoy.fechas, hoy);
   if(!fs.length) return "";
   if(!fechaSel || !fs.includes(fechaSel)) fechaSel = fs[0];
   const delDia = D.hoy.partidos.filter(p=>p.fecha===fechaSel);
   const regiones = ["Todas", ...["Europa","Sudamérica","Norteamérica"].filter(r=>delDia.some(p=>p.region===r))];
+  if(!regiones.includes(regionSel)) regionSel = "Todas";
   const ligas = ["Todas", ...new Set(delDia.filter(p=>regionSel==="Todas"||p.region===regionSel).map(p=>p.liga))];
   if(!ligas.includes(ligaSel)) ligaSel = "Todas";
-  return `<div class="chips fechas">${fs.map(f=>`<button aria-pressed="${f===fechaSel}" class="${f===fechaSel?"on":""}" data-fecha="${esc(f)}">${esc(etiquetaFecha(f,hoy))}<small style="display:block;font-size:10px;opacity:.7">${D.hoy.partidos.filter(p=>p.fecha===f).length} partidos</small></button>`).join("")}</div>
-    <div class="chips">${regiones.map(r=>`<button aria-pressed="${r===regionSel}" class="${r===regionSel?"on":""}" data-region="${esc(r)}">${r==="Todas"?"Todas las regiones":esc(r)}</button>`).join("")}</div>
-    <div class="chips">${ligas.map(l=>`<button aria-pressed="${l===ligaSel}" class="${l===ligaSel?"on":""}" data-ligasel="${esc(l)}">${l==="Todas"?"Todas las ligas":esc(l)}</button>`).join("")}</div>`;
+  const cuenta = f => D.hoy.partidos.reduce((n,p)=>n+(p.fecha===f?1:0), 0);
+  const opt = (v, sel, todas) => `<option value="${esc(v)}"${v===sel?" selected":""}>${v==="Todas"?todas:esc(v)}</option>`;
+  return `<div class="fechas" role="group" aria-label="Fecha">${fs.map(f=>`<button class="fecha" aria-pressed="${f===fechaSel}" data-fecha="${esc(f)}"><b>${esc(etiquetaFecha(f,hoy))}</b><span>${cuenta(f)} partidos</span></button>`).join("")}</div>
+    <div class="filtros"><label class="sel"><span>Región</span><select id="${pref}-region" data-f="region">${regiones.map(r=>opt(r,regionSel,"Todas")).join("")}</select></label>
+    <label class="sel"><span>Liga</span><select id="${pref}-liga" data-f="liga">${ligas.map(l=>opt(l,ligaSel,"Todas")).join("")}</select></label></div>`;
 }
-function ligarFiltros(el, rerender){
-  el.querySelectorAll("[data-fecha]").forEach(b=>b.onclick=()=>{ fechaSel=b.dataset.fecha; ligaSel="Todas"; rerender(); barra() });
-  el.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{ regionSel=b.dataset.region; ligaSel="Todas"; rerender(); barra() });
-  el.querySelectorAll("[data-ligasel]").forEach(b=>b.onclick=()=>{ ligaSel=b.dataset.ligasel; rerender(); barra() });
+function buscaHTML(pref){
+  return `<label class="sr" for="${pref}-busca">Buscar equipo</label><div class="busca">${ICONO("search")}<input id="${pref}-busca" type="search" placeholder="Buscar equipo…" value="${esc(buscaRaw)}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></div>`;
 }
-
+// Ata fechas/selectores/búsqueda. onChange repinta SOLO la lista (no se recrea la vista ni el campo de búsqueda).
+function ligarFiltros(pref, onChange){
+  const cont = $(`#${pref}-fil`), inp = $(`#${pref}-busca`); if(!cont) return;
+  const refrescar = foco => {
+    cont.innerHTML = filtrosHTML(pref); lim.h = lim.p = LIM0;
+    const x = foco && cont.querySelector(foco); if(x) x.focus();
+    onChange(); barra();
+  };
+  cont.addEventListener("click", e=>{
+    const b = e.target.closest("[data-fecha]"); if(!b) return;
+    fechaSel = b.dataset.fecha; ligaSel = "Todas"; refrescar(`[data-fecha="${CSS.escape(fechaSel)}"]`);
+  });
+  cont.addEventListener("change", e=>{
+    const t = e.target, f = t.dataset && t.dataset.f; if(!f) return;
+    if(f==="region"){ regionSel = t.value; ligaSel = "Todas" } else ligaSel = t.value;
+    refrescar(`#${pref}-${f}`);
+  });
+  if(inp){
+    let tm; inp.addEventListener("input", ()=>{ clearTimeout(tm); tm = setTimeout(()=>{ buscaRaw = inp.value; busca = norm(buscaRaw); lim.h = lim.p = LIM0; onChange() }, 120) });
+  }
+}
 // ------------------------------------------------------------- carga
 async function cargar(){
   const t = Date.now(); D.offline = false;
@@ -178,33 +289,42 @@ function reconciliar(){
   if(ch) LS.set("hechos", hechos);
 }
 function sinDatosCorto(){ return EST.hoy==="red" ? "Sin conexión" : EST.hoy==="json"||EST.hoy==="formato" ? "Datos ilegibles" : EST.hoy==="http" ? "Error del servidor" : "Aún no hay datos: corre el análisis desde Ajustes" }
+const vacioHTML = (icono, titulo, texto, extra) => `<div class="vacio"><div class="ico">${ICONO(icono)}</div><b>${esc(titulo)}</b>${texto?esc(texto):""}${extra||""}</div>`;
+function sinValorHTML(extra){
+  const fe = D.hoy && D.hoy.fuentes_estado;
+  if(fe && typeof fe==="object" && fe.cuotas_casas===false)
+    return vacioHTML("diamond","No hay cuotas de casas de apuestas", (fe.mensaje ? String(fe.mensaje)+" " : "")+"Sin ellas no se puede calcular el valor: falta configurar ODDS_API_KEY. Mientras tanto revisa las seguras.", extra);
+  return vacioHTML("diamond","Hoy no hay apuestas de valor claras","Revisa las seguras o escribe cuotas de Ecuabet en Partidos.", extra);
+}
 function sinDatosHTML(){
-  const m = EST.hoy==="red" ? "Sin conexión y no hay datos guardados.<br>Conéctate a internet y toca ↻."
-    : (EST.hoy==="json"||EST.hoy==="formato") ? "Aún no hay datos válidos: los recibidos están dañados o incompletos.<br>Intenta de nuevo con ↻ en unos minutos."
-    : EST.hoy==="http" ? "El servidor no respondió bien.<br>Intenta de nuevo con ↻."
-    : "Aún no hay datos.<br>Cuando el sistema corra (todos los días 07:00 y 13:00) aparecerán aquí.";
-  return `<div class="card empty">${m}</div>`;
+  const m = EST.hoy==="red" ? ["Sin conexión y no hay datos guardados.","Conéctate a internet y toca ↻."]
+    : (EST.hoy==="json"||EST.hoy==="formato") ? ["Aún no hay datos válidos: los recibidos están dañados o incompletos.","Intenta de nuevo con ↻ en unos minutos."]
+    : EST.hoy==="http" ? ["El servidor no respondió bien.","Intenta de nuevo con ↻."]
+    : ["Aún no hay datos.","Cuando el sistema corra (todos los días 07:00 y 13:00) aparecerán aquí."];
+  return vacioHTML("info", m[0], m[1]);
 }
 function avisosHTML(){
   const a = [];
-  if(D.offline) a.push(`<div class="banner warn">Modo sin conexión: mostrando datos guardados.</div>`);
+  if(D.offline) a.push(avisoHTML("warn","wifi","Sin conexión","Modo sin conexión: mostrando datos guardados."));
   if(D.hoy){
-    if(D.hoy.simulacion===true || D.hoy.creditos==="simulación") a.push(`<div class="banner bad">SIMULACIÓN — no son picks reales.</div>`);
+    if(D.hoy.simulacion===true || D.hoy.creditos==="simulación") a.push(avisoHTML("bad","alert","Simulación: no son picks reales","Estos datos son de ejemplo. No apuestes con ellos.","alert"));
     const h = horasDesde(D.hoy.generado), sinFechas = !fechasVigentes(D.hoy.fechas, hoyEC()).length;
-    if(sinFechas || h>20){
+    if(sinFechas || h>26){
       const cuando = !isFinite(h) ? "" : h>=48 ? ` (generado hace ${Math.round(h/24)} días)` : ` (generado hace ${Math.round(h)} h)`;
-      a.push(`<div class="banner bad">Datos desactualizados${cuando}.${sinFechas?" No hay partidos de hoy en adelante.":""} No apuestes con estos datos.</div>`);
+      a.push(avisoHTML("bad","alert",`Datos desactualizados${cuando}`,`${sinFechas?"No hay partidos de hoy en adelante. ":""}No apuestes con estos datos.`,"alert"));
     }
-    if(D.hoy.aviso) a.push(`<div class="banner warn">${esc(D.hoy.aviso)}</div>`);
+    if(D.hoy.aviso) a.push(avisoHTML("info","info","Aviso del sistema",D.hoy.aviso));
+    const fe = D.hoy.fuentes_estado;
+    if(fe && typeof fe==="object" && fe.mensaje) a.push(avisoHTML("info","info","Estado de las fuentes",String(fe.mensaje)));
   }
   $("#avisos").innerHTML = a.join("");
 }
-function renderTodo(){ avisosHTML(); vHoy(); vPartidos(); vRend(); vFuentes(); vAjustes(); barra() }
+function renderTodo(){ $("#v-hoy").removeAttribute("aria-busy"); avisosHTML(); vHoy(); vPartidos(); vRend(); vFuentes(); vAjustes(); barra() }
 
 // ----------------------------------------------------------- HOY
 function fuentesHTML(s){
   return Object.entries(s.detalle||{}).sort((a,b)=>((s.pesos||{})[b[0]]||0)-((s.pesos||{})[a[0]]||0)).map(([f,p])=>{
-    const [n,v] = FUENTE[f]||[f,"--tx3"];
+    const [n,v] = finfo(f);
     return `<span class="src"><span class="dot" style="background:var(${v})"></span>${esc(n)} <b>${pct(p)}</b>${s.pesos&&s.pesos[f]!=null?` <span class="meta">${pct(s.pesos[f])}</span>`:""}</span>`}).join("");
 }
 function iaHTML(s){
@@ -212,39 +332,51 @@ function iaHTML(s){
   const t = {bajo:["ok","Riesgo bajo"], medio:["warn","Riesgo medio"], alto:["bad","Riesgo alto"]}[s.ia.riesgo]||["","IA"];
   return `<div class="ia"><span class="tag ${t[0]}">IA · ${t[1]}</span> ${esc(s.ia.resumen||"")}${(s.ia.alertas||[]).length?`<ul>${s.ia.alertas.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`:""}</div>`;
 }
-function umbral(tipo){ return tipo==="valor" ? cfg().ventaja_minima : 0 }
+function umbral(tipo){ return valorLike(tipo) ? cfg().ventaja_minima : 0 }
 function tarjeta(s, i, tipo){
   const k = key(s,tipo), est = esEst(s,tipo), ms = tipo==="segura" ? montoSegura(cfg()) : null;
   const o = cuotas[k] ?? (est ? "" : (s.cuota_ecuabet ?? ""));
   const h = hechos[k], enT = !!ticket[k];
-  const minimo = tipo==="valor" ? s.cuota_minima : s.cuota_justa;
-  const estado = est ? `<span class="tag warn">Cuota estimada: apostar solo si Ecuabet paga ≥ ${c2(minimo)}</span>`
-              : s.confirmado ? `<span class="tag ok">Cuota de Ecuabet confirmada</span>`
-              : `<span class="tag warn">Apostar solo si Ecuabet paga ≥ ${c2(minimo)}</span>`;
-  const ref = tipo==="valor"
+  const minimo = valorLike(tipo) ? s.cuota_minima : s.cuota_justa;
+  const pp = Math.max(0, Math.min(100, Math.round(+s.p*100) || 0));
+  const tercera = valorLike(tipo) ? [s.mejor_cuota ? c2(s.mejor_cuota) : "–", "Mejor cuota"]
+                : est ? ["~"+c2(s.cuota_est), "Est. Ecuabet"] : [c2(s.cuota_ecuabet ?? s.cuota_est), "Ecuabet"];
+  const nivelTag = tipo==="locas" ? `<span class="tag lv">${ICONO("bolt")}LOCA${s.ev!=null&&isFinite(+s.ev)?" · valor "+(s.ev>=0?"+":"")+pct(s.ev,1):""}</span><span class="tag bad">${ICONO("alert")}Alto riesgo</span>`
+                 : tipo==="valor" ? `<span class="tag lv">${ICONO("diamond")}Valor${s.ev!=null&&isFinite(+s.ev)?" "+(s.ev>=0?"+":"")+pct(s.ev,1):""}</span>`
+                 : `<span class="tag lv">${ICONO("shield")}${tipo==="alta"?"Alta probabilidad":"Segura"}</span>`;
+  const estadoTag = est ? `<span class="tag warn">${ICONO("alert")}Cuota estimada</span>`
+                  : s.confirmado ? `<span class="tag ok">${ICONO("check")}Cuota de Ecuabet confirmada</span>`
+                  : `<span class="tag warn">${ICONO("alert")}Cuota sin confirmar</span>`;
+  const nf = +s.n_fuentes, tot = Object.keys(s.detalle||{}).length;
+  const fuentesTag = isFinite(nf) && nf>0 ? `<span class="tag">${nf} de ${Math.max(nf,tot)} fuentes</span>` : "";
+  const ri = s.ia ? {bajo:["ok","bajo"], medio:["warn","medio"], alto:["bad","alto"]}[s.ia.riesgo] : null;
+  const iaTag = ri ? `<span class="tag ${ri[0]}">IA: riesgo ${ri[1]}</span>` : "";
+  const ref = tipo==="locas"
+      ? `Probabilidad real ${pct(s.p,1)} · cuota ${s.mejor_cuota ? c2(s.mejor_cuota)+(s.mejor_casa?" ("+esc(s.mejor_casa)+")":"") : "sin referencia"}${s.ev!=null?` · valor ${pct(s.ev,1)}`:""}. Se pierde la mayoría de las veces.`
+    : tipo==="valor"
       ? (s.mejor_cuota ? `Mejor cuota: ${c2(s.mejor_cuota)} (${esc(s.mejor_casa)})${s.ev!=null?` · valor ${pct(s.ev,1)}`:""}` : "Sin cuota de referencia")
       : `Gana ${pct(s.p)} de las veces · ${s.tipo_cuota==="ecuabet"&&!est?"Ecuabet paga":"las casas suelen pagar"} ~${c2(s.cuota_est)}${est?" (estimada)":""}`;
-  const cobro = (ms && !ms.insuf && isFinite(ms.monto*minimo)) ? `${est?"Cobrarías ~":"Cobras "}$${(ms.monto*minimo).toFixed(2)}` : "Monto";
-  return `<div class="card" data-k="${esc(k)}">
-    <div class="row meta"><span>#${i} · ${esc(s.liga)} · ${esc(s.mercado)}</span><span>${hora(s.inicio)}</span></div>
-    <div class="match">${esc(s.local)} <small>vs</small> ${esc(s.visita)}</div>
-    <div class="pick">${esc(s.nombre)}</div>
-    <div class="grid4">
-      <div><b>${pct(s.p)}</b><span>Probabilidad</span></div>
-      <div><b>${c2(s.cuota_justa)}</b><span>Cuota justa</span></div>
-      <div><b>${c2(minimo)}</b><span>Cuota mínima</span></div>
-      <div><b>${ms && !ms.insuf ? usdn(ms.monto) : "–"}</b><span>${esc(cobro)}</span></div>
+  const monto = (ms && !ms.insuf) ? ` Monto sugerido <b>${usdn(ms.monto)}</b>${isFinite(ms.monto*minimo)?` · ${est?"cobrarías ~":"cobras "}<b>$${(ms.monto*minimo).toFixed(2)}</b>`:""}.` : "";
+  const fu = fuentesHTML(s), ia = iaHTML(s);
+  const mas = (fu||ia) ? `<details class="mas"><summary>${ICONO("chev")}Fuentes y análisis</summary><div class="srcs">${fu}</div>${ia}</details>` : "";
+  const nombre = `${s.local} vs ${s.visita}: ${s.nombre}`;
+  return `<article class="pick ${tipo}" data-item data-k="${esc(k)}" tabindex="-1" aria-label="${esc("Pick "+i+": "+nombre)}">
+    <div class="p-top"><span class="liga">${ICONO("ball")}${esc(s.liga)}${s.region?" · "+esc(s.region):""}</span><span class="hora" title="Hora de Ecuador">${ICONO("clock")}${esc(horaCorta(s.inicio))}</span></div>
+    <div class="p-main">
+      <div><h3 class="teams">${esc(s.local)}<i>vs</i>${esc(s.visita)}</h3><p class="sel-name">${esc(s.nombre)}</p><p class="mercado">${esc(s.mercado)}</p></div>
+      <div class="ring" style="--p:${pp}" role="img" aria-label="Probabilidad ${pp} por ciento"><div class="t"><b>${pct(s.p)}</b><small>prob.</small></div></div>
     </div>
-    <div class="srcs">${fuentesHTML(s)}</div>
-    <div class="meta">${ref}</div>
-    ${iaHTML(s)}
-    <div style="margin-top:8px">${estado} ${ms&&ms.insuf?`<span class="tag bad">No apostar (banca insuficiente)</span>`:""} ${tagHecho(h)}</div>
-    <div class="oddsbox">
-      <input type="text" inputmode="decimal" placeholder="Cuota Ecuabet" value="${esc(o)}" data-in="${esc(k)}" data-tipo="${esc(tipo)}" aria-label="Cuota que ves en Ecuabet para ${esc(s.nombre)}" autocomplete="off">
-      <button class="btn ${enT?"sel":""}" data-tk="${esc(k)}" aria-pressed="${enT}">${enT?"✓ En ticket":"+ Ticket"}</button>
+    <div class="stats"><div class="stat"><b>${c2(s.cuota_justa)}</b><span>Cuota justa</span></div><div class="stat key"><b>${c2(minimo)}</b><span>Apostar si ≥</span></div><div class="stat"><b>${esc(tercera[0])}</b><span>${tercera[1]}</span></div></div>
+    <div class="tags">${nivelTag}${estadoTag}${fuentesTag}${iaTag}${ms&&ms.insuf?`<span class="tag bad">${ICONO("alert")}No apostar (banca insuficiente)</span>`:""}${tagHecho(h)}</div>
+    <p class="regla">Apuesta solo si Ecuabet paga <b>${c2(minimo)} o más</b>.${monto}<br><span class="meta">${ref}</span></p>
+    ${mas}
+    <div class="acciones">
+      <input class="in-cuota" type="text" inputmode="decimal" placeholder="Cuota Ecuabet" value="${esc(o)}" data-in="${esc(k)}" data-tipo="${esc(tipo)}" aria-label="Cuota que ves en Ecuabet para ${esc(s.nombre)}" autocomplete="off">
+      <button class="btn ${enT?"sel":"pri"}" data-tk="${esc(k)}" aria-pressed="${enT}">${enT?"✓ En ticket":"+ Ticket"}</button>
     </div>
     <div class="calc" data-calc="${esc(k)}" aria-live="polite"></div>
-  </div>`;
+    <div class="acciones una"><button class="btn ghost block" data-copia="${esc(textoPick(s, minimo))}">${ICONO("copy")}Copiar selección</button></div>
+  </article>`;
 }
 function tagHecho(h){
   if(!h) return "";
@@ -254,19 +386,22 @@ function tagHecho(h){
 }
 // monto efectivo y si la banca no alcanza; r = resultado de evalCuota (o null sin cuota)
 function montoPick(s, r){
+  if(s._t==="locas") return montoLoca(s, r, cfg());
   if(s._t==="segura"){ const m = montoSegura(cfg()); return {monto:m.monto, insuf:m.insuf || !!(r&&r.insuf)} }
   return {monto: r ? r.monto : 0, insuf: !!(r&&r.insuf)};
 }
-let _lista = [], _mapa = new Map(), _paraHoy = null;
+let _lista = [], _mapa = new Map(), _paraHoy = null, _porUid = new Map();
 function todosPicks(){
-  if(!D.hoy){ _lista=[]; _mapa=new Map(); _paraHoy=null; return _lista }
+  if(!D.hoy){ _lista=[]; _mapa=new Map(); _porUid=new Map(); _paraHoy=null; return _lista }
   if(_paraHoy!==D.hoy){
     _paraHoy = D.hoy; _lista = [];
     // todos los días (para que el ticket conserve picks de otras fechas); la clave incluye el tipo
     for(const d of Object.values(D.hoy.dias||{}))
-      for(const [t,arr] of [["valor",d.valor],["segura",d.seguras],["alta",d.alta]])
+      for(const [t,arr] of [["valor",d.valor],["segura",d.seguras],["alta",d.alta],["locas",d.locas]])
         for(const s of (arr||[])) _lista.push({...s, _t:t, _k:key(s,t)});
     _mapa = new Map(_lista.map(s=>[s._k, s]));
+    _porUid = new Map();
+    for(const s of _lista){ const a = _porUid.get(String(s.uid)); if(a) a.push(s); else _porUid.set(String(s.uid), [s]) }
   }
   return _lista;
 }
@@ -298,35 +433,52 @@ function armar(pool, objCuota, maxP=8){
   const p = el.reduce((t,s)=>t*s.p,1);
   return {piernas:el, cuota:c, p};
 }
-function combinadaHTML(c, monto, titulo){
-  const m = +monto, cuota = +c.cuota, p = +c.p;
+function combinadaHTML(c, monto, titulo, etiqueta="Grande"){
+  const m = (isFinite(+monto) && +monto>0) ? +monto : gMonto, cuota = +c.cuota, p = +c.p, L = c.piernas || [];
   const neta = (c.ganancia!=null && isFinite(+c.ganancia)) ? +c.ganancia : m*(cuota-1);   // ganancia neta
   const cobro = m + neta;
   const ev = (c.ev_estimado!=null && isFinite(+c.ev_estimado)) ? +c.ev_estimado : (c.ev!=null && isFinite(+c.ev)) ? +c.ev : p*cuota-1;
   const veces = p>0 ? Math.max(1, Math.round(1/p)) : null;
+  const pp = Math.max(0, Math.min(100, p*100)) || 0;
+  const ptxt = (p>0 && p<.01) ? "<1%" : Math.round(pp)+"%";
   const txtEv = ev<0 ? `En promedio recuperas ~$${(1+ev).toFixed(2)} por cada $1 apostado: a largo plazo se pierde.`
                      : `Sale positivo solo porque las cuotas son estimadas; no cuentes con ello.`;
-  return `<div class="card">
-    <div class="row"><span class="meta">${esc(titulo)}</span><span class="tag">${(c.piernas||[]).length} selecciones</span></div>
-    <div class="row" style="align-items:flex-end;margin:6px 0"><div><div class="big">$${neta.toFixed(0)}</div><div class="meta">Ganancia si aciertas todas (cobro $${cobro.toFixed(2)} − monto $${m.toFixed(2)}) · cuota ${isFinite(cuota)?cuota.toFixed(2):"–"}</div></div>
-      <div style="text-align:right"><b style="font-size:18px">${(p*100).toFixed(1)}%</b><div class="meta">${veces?`≈ 1 de cada ${veces}`:""}</div></div></div>
-    <div class="prob-bar" role="img" aria-label="Probabilidad ${(p*100).toFixed(1)}%"><i style="width:${Math.max(2,p*100)}%"></i></div>
-    <div style="margin:6px 0"><span class="tag warn">Cuota estimada — Ecuabet puede pagar menos</span></div>
-    <div class="meta" style="margin-bottom:6px"><b class="${ev<0?"neg":"pos"}">Valor esperado ≈ ${(ev*100).toFixed(1)}%</b> · ${txtEv}</div>
-    ${(c.piernas||[]).map(s=>`<div class="leg"><span><b>${esc(s.nombre)}</b><br><span class="meta">${esc(s.local)} vs ${esc(s.visita)} · ${hora(s.inicio)}</span>${s.ia&&s.ia.riesgo==="medio"?' <span class="tag warn">IA: riesgo medio</span>':""}</span><span style="text-align:right">${pct(s.p)}<br><span class="meta">~${c2(s.cuota_est)} est.</span></span></div>`).join("")}
-    <div class="row" style="gap:8px;margin-top:10px;justify-content:flex-start"><button class="btn small" data-copiarcomb='${esc(JSON.stringify((c.piernas||[]).map(s=>`${s.local} vs ${s.visita} — ${s.nombre}`)))}'>Copiar para Ecuabet</button></div>
-  </div>`;
+  return `<article class="pick grande" data-item tabindex="-1" aria-label="${esc("Combinada: "+titulo+", "+L.length+" selecciones")}">
+    <div class="p-top"><span class="liga">${ICONO("rocket")}${esc(titulo)} · ${L.length} selecciones</span><span class="tag lv">${ICONO("rocket")}${esc(etiqueta)}</span></div>
+    <div class="p-main">
+      <div><p class="mercado">Si aciertas todas (monto $${m.toFixed(2)})</p><p class="big">+$${neta.toFixed(0)}</p><p class="mercado">Cobro total $${cobro.toFixed(2)} · cuota ${isFinite(cuota)?cuota.toFixed(2):"–"}</p></div>
+      <div class="ring" style="--p:${pp.toFixed(1)}" role="img" aria-label="Probabilidad real ${(p*100).toFixed(1)} por ciento"><div class="t"><b>${ptxt}</b><small>${veces?"1 de "+veces:""}</small></div></div>
+    </div>
+    <div class="barra" aria-hidden="true"><i style="width:${Math.max(2,pp)}%"></i></div>
+    <ul class="legs">${L.map((s,i)=>`<li><span class="n">${i+1}</span><div>${esc(s.nombre)}<div class="m">${esc(s.local)} vs ${esc(s.visita)} · ${esc(hora(s.inicio))}</div>${s.ia&&s.ia.riesgo==="medio"?`<span class="tag warn">IA: riesgo medio</span>`:""}</div><div class="pr">${pct(s.p)}<span>~${c2(s.cuota_est)} est.</span></div></li>`).join("")}</ul>
+    <div class="tags"><span class="tag ${ev<0?"bad":"warn"}">${ICONO("alert")}Valor esperado ≈ ${(ev*100).toFixed(1)}%</span><span class="tag warn">Cuota estimada: Ecuabet puede pagar menos</span></div>
+    <p class="regla">${txtEv}</p>
+    <div class="acciones una"><button class="btn ghost block" data-copia="${esc(textoCombinada(c))}">${ICONO("copy")}Copiar selección</button></div>
+  </article>`;
 }
-function vGrandes(){
-  const DD = dia();
-  let h = `<div class="note">Combinadas para ganar mucho con poco. El sistema elige las selecciones que <b>más probabilidad conservan</b> por cada punto de cuota que suman. Aun así, la mayoría no se gana: mira la probabilidad real de cada una.</div>`;
-  h += `<div class="card"><b>Arma la tuya</b>
+function vGrandes(DD, completo=true, filtrado=false){
+  let h = avisoHTML("warn","alert","Casi nunca se ganan","Con varias selecciones basta que falle una. Apuesta solo lo que estés dispuesto a perder.");
+  if(completo){
+    h += `<div class="note">Combinadas para ganar mucho con poco. El sistema elige las selecciones que <b>más probabilidad conservan</b> por cada punto de cuota que suman. Mira siempre la probabilidad real de cada una.</div>`;
+    h += `<div class="panel"><b>Arma la tuya</b>
     <label class="field"><span>Monto a apostar (USD)</span><input type="text" inputmode="decimal" id="g-monto" value="${esc(gMonto)}" autocomplete="off"></label>
     <div class="meta" style="margin-bottom:6px">Quiero cobrar:</div>
-    <div class="chips obj">${[50,100,200,500,1000].map(v=>`<button aria-pressed="${v==gObj}" class="${v==gObj?"on":""}" data-obj="${v}">$${v}</button>`).join("")}</div>
-    <div id="g-res"></div></div>`;
-  if(DD.grandes.length) h += `<h2>Combinadas sugeridas</h2>` + DD.grandes.map(c=>combinadaHTML(c, c.monto, `Objetivo $${c.objetivo}`)).join("");
-  h += `<h2>Cómo se comportan</h2><div class="card meta">En la prueba con datos reales de los últimos 30 días, las piernas acertaron lo que el sistema predijo (63% contra 64% esperado), pero las combinadas de $100 y $200 se perdieron todas. Con 7–8 selecciones basta con que falle una. Apuesta en ellas solo lo que estés dispuesto a perder.</div>`;
+    <div class="chips obj" role="group" aria-label="Cobro objetivo">${[50,100,200,500,1000].map(v=>`<button aria-pressed="${v==gObj}" data-obj="${v}">$${v}</button>`).join("")}</div>
+    <div id="g-res" aria-live="polite"></div></div>`;
+  }
+  if(DD.grandes.length) h += `<h2>Combinadas sugeridas</h2>` + DD.grandes.map(c=>combinadaHTML(c, c.monto, c.objetivo!=null?`Objetivo $${c.objetivo}`:"Combinada")).join("");
+  else if(filtrado) h += vacioHTML("search","Sin resultados con ese filtro","Prueba con otro equipo, liga o fecha.");
+  else if(!completo) h += vacioHTML("rocket","Hoy no hay Grandes sugeridas","");
+  if(completo) h += `<h2>Cómo se comportan</h2><div class="panel meta">En la prueba con datos reales de los últimos 30 días, las piernas acertaron lo que el sistema predijo (63% contra 64% esperado), pero las combinadas de $100 y $200 se perdieron todas. Con 7–8 selecciones basta con que falle una. Apuesta en ellas solo lo que estés dispuesto a perder.</div>`;
+  return h;
+}
+// Combinadas: dias[f].combinadas si existe; si no, se muestran las Grandes con aviso (para no dejar la sección vacía de forma engañosa).
+function vCombinadas(DD, filtrado){
+  const falta = DD.combSinDato, L = falta ? DD.grandes : DD.combinadas;
+  let h = falta ? avisoHTML("info","info","Solo se muestran las Grandes","Este análisis aún no trae combinadas propias; estas son las combinadas Grandes del día.") : "";
+  h += avisoHTML("warn","alert","Casi nunca se ganan","Con varias selecciones basta que falle una. Mira siempre la probabilidad real y apuesta solo lo que estés dispuesto a perder.");
+  if(L.length) h += L.map(c=>combinadaHTML(c, c.monto, c.objetivo!=null?`Objetivo $${c.objetivo}`:"Combinada", falta?"Grande":"Combinada")).join("");
+  else h += filtrado ? vacioHTML("search","Sin resultados con ese filtro","Prueba con otro equipo, liga o fecha.") : vacioHTML("rocket","Hoy no hay combinadas sugeridas","Vuelve tras el próximo análisis.");
   return h;
 }
 function pintarBuilder(){
@@ -335,42 +487,123 @@ function pintarBuilder(){
   const c = armar(dia().pool, gObj/Math.max(0.5,gMonto));
   el.innerHTML = c ? combinadaHTML(c, gMonto, `Para cobrar ~$${gObj}`) : `<div class="empty">Con los partidos de este día no se llega a ese objetivo con ese monto. Sube el monto o baja el objetivo.</div>`;
 }
+const avisoLocasHTML = () => `<div class="aviso loca" role="note">${ICONO("bolt")}<div><strong>Alto riesgo:</strong> ${esc(AVISO_LOCAS.replace(/^Alto riesgo:\s*/,""))}</div></div>`;
+function sinLocasHTML(){
+  const fe = D.hoy && D.hoy.fuentes_estado;
+  const razon = (fe && typeof fe==="object" && fe.cuotas_casas===false) ? ((fe.mensaje ? String(fe.mensaje)+" " : "")+"No hay cuotas de casas de apuestas (falta configurar ODDS_API_KEY), así que no se puede calcular la ventaja.") : "";
+  return vacioHTML("bolt","Hoy no hay Locas con ventaja real (requieren cuotas de casas)", razon);
+}
 function vHoy(){
   const el = $("#v-hoy");
   if(!D.hoy){ el.innerHTML = sinDatosHTML(); return }
-  const DD = dia(), v = DD.valor, a = DD.alta, sg = DD.seguras, gr = DD.grandes;
-  const sinFechas = !fechasVigentes(D.hoy.fechas, hoyEC()).length;
-  if(sinFechas){ el.innerHTML = `<div class="card empty"><b>Los datos son de fechas pasadas.</b><br>No se muestran picks para no apostar con información vieja. Espera al próximo análisis o corre "Analizar ahora" en Ajustes.</div>`; return }
-  const tabs = [["seguras","Seguras",`${sg.length} picks`],["valor","Valor",`${v.length} picks`],["grandes","Grandes",`${gr.length} combinadas`]];
-  let h = barraFiltros() + `<div class="seg" role="tablist" aria-label="Nivel de picks">${tabs.map(([n,t,s])=>`<button role="tab" aria-selected="${nivel===n}" class="${nivel===n?"on":""}" data-nivel="${n}">${t}<small>${s}</small></button>`).join("")}</div>`;
-  if(DD.ocultos) h += `<div class="meta" style="margin:6px 4px">${DD.ocultos} pick(s) ocultos porque el partido ya empezó.</div>`;
-  if(nivel==="seguras"){
-    h += `<div class="note">Apuestas pequeñas con alta probabilidad (cuota 1.25–1.60). Escribe la cuota de Ecuabet y te digo si paga lo suficiente.</div>`;
-    h += sg.length ? sg.map((s,i)=>tarjeta(s,i+1,"segura")).join("") : `<div class="card empty">No hay selecciones con probabilidad suficiente para este filtro.</div>`;
-  } else if(nivel==="valor"){
-    h += `<div class="note">Apuestas donde la cuota paga más de lo que vale. Son las más rentables a largo plazo, pero aparecen menos.</div>`;
-    h += v.length ? v.map((s,i)=>tarjeta(s,i+1,"valor")).join("") : `<div class="card empty"><b>Hoy no hay apuestas de valor claras.</b><br>Revisa las seguras o escribe cuotas de Ecuabet en "Partidos".</div>`;
-    if(a.length) h += `<h2>Alta probabilidad</h2>` + a.map((s,i)=>tarjeta(s,i+1,"alta")).join("");
-  } else {
-    h += vGrandes();
+  if(!fechasVigentes(D.hoy.fechas, hoyEC()).length){
+    el.innerHTML = vacioHTML("alert","Los datos son de fechas pasadas.","No se muestran picks para no apostar con información vieja. Espera al próximo análisis o corre \"Analizar ahora\" en Ajustes.");
+    return;
   }
-  h += `<h2>Cómo sacar tu código de Ecuabet</h2><div class="card"><ol style="margin:0;padding-left:20px">
-      <li>Toca <b>+ Ticket</b> en los picks que quieres jugar, o <b>Copiar para Ecuabet</b> en una combinada.</li><li>Abre Ecuabet, busca cada partido y escribe aquí la cuota que ves.</li>
-      <li>Si sale ✔, agrégalo al cupón de Ecuabet.</li><li>En el cupón toca <b>guardar/reservar apuesta</b>: ese es tu código.</li>
-      <li>En <b>Ver ticket</b> toca <b>Registrar apuestas</b> para medir tu rendimiento.</li></ol></div>`;
-  el.innerHTML = h;
-  ligarFiltros(el, vHoy);
-  el.querySelectorAll("[data-nivel]").forEach(b=>b.onclick=()=>{ nivel=b.dataset.nivel; LS.set("nivel",nivel); vHoy(); barra() });
+  nivel = nivelValido(nivel);
+  el.innerHTML = `<div id="h-fil">${filtrosHTML("h")}</div>${buscaHTML("h")}
+    <div class="niv" role="group" aria-label="Nivel de picks">${NIVELES_ORDEN.map(([n,t])=>`<button type="button" data-nivel="${n}" aria-pressed="${nivel===n}">${t} <span class="n">(0)</span></button>`).join("")}</div>
+    <div id="h-lista"></div>`;
+  ligarFiltros("h", pintarHoy);
+  el.querySelectorAll("[data-nivel]").forEach(b=>b.onclick=()=>irNivel(b.dataset.nivel));
+  pintarHoy();
+}
+function irNivel(n){ nivel = nivelValido(n); LS.set("nivel", nivel); lim.h = LIM0; pintarHoy(); barra() }
+// Pinta SOLO la lista (y los conteos de los chips): se llama al teclear en la búsqueda, cambiar filtros o nivel.
+function pintarHoy(){
+  const lista = $("#h-lista"); if(!lista) return;
+  const DD = dia(), v = DD.valor, a = DD.alta, sg = DD.seguras, gr = DD.grandes, lc = DD.locas;
+  const nComb = DD.combSinDato ? gr.length : DD.combinadas.length;
+  const cont = {seguras:sg.length, valor:v.length+a.length, grandes:gr.length, combinadas:nComb, locas:lc.length,
+                todos: sg.length+v.length+a.length+lc.length+gr.length+(DD.combSinDato?0:DD.combinadas.length)};
+  $("#v-hoy").querySelectorAll("[data-nivel]").forEach(b=>{ b.setAttribute("aria-pressed", String(b.dataset.nivel===nivel)); b.querySelector(".n").textContent = `(${cont[b.dataset.nivel]})` });
+  const filtrado = !!busca || regionSel!=="Todas" || ligaSel!=="Todas";
+  const sinRes = vacioHTML("search","Sin resultados con ese filtro","Prueba con otro equipo, liga o fecha.");
+  const sec = seccionesDe(nivel), todos = nivel==="todos";
+  let h = DD.ocultos ? `<p class="meta cnt">${DD.ocultos} pick(s) ocultos porque el partido ya empezó.</p>` : "";
+  const items = [];
+  if(sec.includes("seguras")) sg.forEach((s,i)=>items.push([s,"segura",i+1]));
+  if(sec.includes("valor")){ v.forEach((s,i)=>items.push([s,"valor",i+1])); a.forEach((s,i)=>items.push([s,"alta",i+1])) }
+  if(sec.includes("locas")) lc.forEach((s,i)=>items.push([s,"locas",i+1]));
+  if(nivel==="seguras"){
+    h += `<p class="lead">Apuestas pequeñas con alta probabilidad (cuota 1.25–1.60). Escribe la cuota de Ecuabet y te digo si paga lo suficiente.</p>`;
+    if(!items.length) h += filtrado ? sinRes : vacioHTML("shield","No hay selecciones seguras","No hay selecciones con probabilidad suficiente para este día.");
+  }else if(nivel==="valor"){
+    h += `<p class="lead">Apuestas donde la cuota paga más de lo que vale. Son las más rentables a largo plazo, pero aparecen menos.</p>`;
+    if(!items.length) h += filtrado ? sinRes : sinValorHTML(`<div style="margin-top:12px"><button class="btn ghost" data-irnivel="seguras">Ver seguras</button></div>`);
+  }else if(nivel==="locas"){
+    h += avisoLocasHTML();
+    h += `<p class="lead">Apuestas de cuota alta (3 o más) con ventaja sobre las casas, pero con probabilidad baja. Son para divertirse con muy poco dinero, no para ganar de forma constante.</p>`;
+    if(!items.length) h += filtrado ? sinRes : sinLocasHTML();
+  }
+  const TIT_G = {segura:"Seguras", valor:"Valor", alta:"Alta probabilidad", locas:"Locas"};
+  const tope = Math.min(lim.h, items.length); let grupo = null;
+  for(let i=0;i<tope;i++){
+    const [s,t,idx] = items[i];
+    if(t!==grupo){
+      grupo = t;
+      if(todos || t==="alta") h += `<h2>${TIT_G[t]}</h2>`;
+      if(todos && t==="locas") h += avisoLocasHTML();
+    }
+    h += tarjeta(s, idx, t);
+  }
+  if(items.length>tope) h += `<div class="vermas"><button class="btn ghost" data-vermas="h">Ver más (${items.length-tope} de ${items.length})</button></div>`;
+  if(sec.includes("grandes") && !(todos && !gr.length)) h += (todos ? `<h2>Grandes</h2>` : "") + vGrandes(DD, !todos, filtrado && !gr.length && !todos);
+  if(sec.includes("combinadas") && !(todos && (DD.combSinDato || !DD.combinadas.length))) h += (todos ? `<h2>Combinadas</h2>` : "") + vCombinadas(DD, filtrado);
+  if(todos && !items.length && !gr.length && !DD.combinadas.length) h += filtrado ? sinRes : vacioHTML("info","No hay picks para este día","Prueba con otra fecha.");
+  h += `<details class="panel guia"><summary>Cómo usar tu selección en Ecuabet</summary><ol>
+      <li>Toca <b>Copiar selección</b> o <b>+ Ticket</b> en los picks que quieres jugar.</li><li>Abre Ecuabet, busca cada partido y escribe aquí la cuota que ves.</li>
+      <li>Si sale ✔, agrégalo al cupón de Ecuabet.</li><li>En el cupón toca <b>guardar/reservar apuesta</b>: ese es tu código (lo genera Ecuabet, no esta app).</li>
+      <li>En <b>Ver ticket</b> toca <b>Registrar apuestas</b> para medir tu rendimiento.</li></ol></details>`;
+  lista.innerHTML = h;
   if(nivel==="grandes"){
-    $("#g-monto").oninput=e=>{ const x=parseFloat(String(e.target.value).replace(",",".")); gMonto=isFinite(x)&&x>0?x:0; if(gMonto>0) LS.set("gMonto",gMonto); pintarBuilder() };
-    el.querySelectorAll("[data-obj]").forEach(b=>b.onclick=()=>{ gObj=+b.dataset.obj; LS.set("gObj",gObj); el.querySelectorAll("[data-obj]").forEach(x=>{ x.classList.toggle("on",x===b); x.setAttribute("aria-pressed",x===b) }); pintarBuilder() });
+    $("#g-monto").oninput = e=>{ const x=parseFloat(String(e.target.value).replace(",",".")); gMonto=isFinite(x)&&x>0?x:0; if(gMonto>0) LS.set("gMonto",gMonto); pintarBuilder() };
+    lista.querySelectorAll("[data-obj]").forEach(b=>b.onclick=()=>{ gObj=+b.dataset.obj; LS.set("gObj",gObj); lista.querySelectorAll("[data-obj]").forEach(x=>x.setAttribute("aria-pressed", String(x===b))); pintarBuilder() });
     pintarBuilder();
   }
-  todosPicks().forEach(s=>pintarCalc(s._k, s._t));
+  todosPicks();
+  lista.querySelectorAll("[data-calc]").forEach(e=>pintarCalc(e.dataset.calc));
 }
-document.addEventListener("click", async e=>{
-  const b=e.target.closest("[data-copiarcomb]"); if(!b) return;
-  try{ await navigator.clipboard.writeText(JSON.parse(b.dataset.copiarcomb).join("\n")); toast("Combinada copiada") }catch(x){ toast("No se pudo copiar") }
+// ---- Estadísticas de Forebet (partidos[].forebet_ctx). Todo texto con esc(); sin dato no se pinta la fila.
+const FM_TXT = {V:"victoria", E:"empate", D:"derrota"};
+function formaHTML(txt){
+  const ch = formaChips(txt);
+  if(ch) return `<span class="fm" role="img" aria-label="${esc(ch.map(c=>FM_TXT[c]).join(", "))}">${ch.map(c=>`<i class="f${c}" aria-hidden="true">${c}</i>`).join("")}</span>`;
+  const t = String(txt ?? "").trim();
+  return (t && typeof txt!=="object") ? `<span>${esc(t.slice(0,40))}</span>` : "";
+}
+function forebetHTML(p){
+  const f = p.forebet_ctx; if(!f || typeof f!=="object" || Array.isArray(f)) return "";
+  const txt = v => (v==null || typeof v==="object") ? "" : String(v).trim();
+  const fila = (n, v) => v ? `<tr><th scope="row">${esc(n)}</th><td>${v}</td></tr>` : "";
+  const fo = f.forma && typeof f.forma==="object" ? f.forma : {}, po = f.posicion && typeof f.posicion==="object" ? f.posicion : {};
+  const eq = (l, v) => { const h = formaHTML(v); return h ? `<div class="fm-eq"><span class="fm-n">${esc(l)}</span>${h}</div>` : "" };
+  const formaTxt = eq(p.local, fo.local) + eq(p.visita, fo.visita);
+  const pos = x => (typeof x==="number" && Number.isInteger(x) && x>0) ? `${x}º` : "";
+  const pl = pos(po.local), pv = pos(po.visita);
+  const posTxt = (pl||pv) ? `${pl?`${esc(p.local)}: <b>${pl}</b>`:""}${pl&&pv?" · ":""}${pv?`${esc(p.visita)}: <b>${pv}</b>`:""}` : "";
+  const gp = (typeof f.goles_prom==="number" && isFinite(f.goles_prom)) ? `<b>${f.goles_prom.toFixed(2)}</b> por partido` : "";
+  const filas = fila("Forma reciente", formaTxt) + fila("Posición en la tabla", posTxt) + fila("Tendencia", esc(txt(f.tendencia)))
+    + fila("Marcador previsto", esc(txt(f.marcador_previsto))) + fila("Promedio de goles", gp) + fila("Clima", esc(txt(f.clima)));
+  const q = f.cuotas_ref && typeof f.cuotas_ref==="object" ? f.cuotas_ref : {};
+  const oc = (l, k) => (typeof q[k]==="number" && isFinite(q[k]) && q[k]>1) ? `<span class="oc"><small>${esc(l)}</small><b>${c2(q[k])}</b></span>` : "";
+  const orow = (n, arr) => { const c = arr.map(([l,k])=>oc(l,k)).join(""); return c ? `<tr><th scope="row">${esc(n)}</th><td><div class="ocs">${c}</div></td></tr>` : "" };
+  const odds = orow("Resultado", [["1","1"],["X","X"],["2","2"]]) + orow("Goles 2,5", [["+2,5","o25"],["−2,5","u25"]]) + orow("Ambos marcan", [["Sí","btts_si"],["No","btts_no"]]);
+  if(!filas && !odds) return "";
+  return `<section class="fb" aria-label="Estadísticas de Forebet"><h4 class="fb-t">Estadísticas de Forebet</h4>
+    ${filas ? tabla(`<table class="fb-tab">${filas}</table>`) : ""}
+    ${odds ? tabla(`<table class="fb-tab fb-odds"><caption>Cuotas de referencia (estimadas, no son de Ecuabet)</caption>${odds}</table>`)
+      + `<p class="meta">Estimación de Forebet de una casa no indicada. Puede diferir mucho de lo que paga Ecuabet: confirma siempre la cuota real.</p>` : ""}</section>`;
+}
+document.addEventListener("click", e=>{
+  const c = e.target.closest("[data-copia]"); if(c){ copiar(c.dataset.copia); return }
+  const g = e.target.closest("[data-irnivel]"); if(g){ irNivel(g.dataset.irnivel); return }
+  const m = e.target.closest("[data-vermas]"); if(!m) return;
+  const w = m.dataset.vermas, cont = $(w==="h" ? "#h-lista" : "#p-lista"); if(!cont) return;
+  const antes = cont.querySelectorAll("[data-item]").length;
+  lim[w] += LIM0; (w==="h" ? pintarHoy : pintarPartidos)();
+  const nuevo = cont.querySelectorAll("[data-item]")[antes];
+  if(nuevo){ const f = nuevo.tagName==="DETAILS" ? nuevo.querySelector("summary") : nuevo; if(f && f.focus) f.focus() }   // el foco no se pierde al desaparecer el botón
 });
 document.addEventListener("input", e=>{
   const k = e.target.dataset && e.target.dataset.in; if(!k) return;
@@ -383,7 +616,8 @@ document.addEventListener("change", e=>{   // al terminar de escribir se guarda 
 document.addEventListener("click", e=>{
   const b = e.target.closest("[data-tk]"); if(!b) return;
   const k = b.dataset.tk; ticket[k] ? delete ticket[k] : ticket[k]=true; LS.set("ticket", ticket);
-  b.classList.toggle("sel", !!ticket[k]); b.setAttribute("aria-pressed", !!ticket[k]); b.textContent = ticket[k] ? "✓ En ticket" : "+ Ticket"; barra();
+  const on = !!ticket[k];
+  b.classList.toggle("sel", on); b.classList.toggle("pri", !on); b.setAttribute("aria-pressed", String(on)); b.textContent = on ? "✓ En ticket" : "+ Ticket"; barra();
 });
 
 // ---------------------------------------------------------- TICKET
@@ -427,7 +661,7 @@ $("#vertk").onclick = ()=>{
       <td>${o? c2(o) : `<span class="meta">mín ${c2(s.cuota_minima)}</span>`}</td><td>${monto && !mp.insuf? "$"+monto.toFixed(2):"–"}</td>
       <td>${r? (r.ok && !mp.insuf? '<span class="pos">✔</span>':'<span class="neg">✘</span>') : "·"}</td></tr>`}).join("");
   const c0 = cfg(), expo = excedeTopeDia(it.filter(s=>s._t==="segura" && !hechos[s._k]).map(s=>({fecha:s.fecha||hoyEC(new Date(s.inicio)), monto:montoPick(s,null).monto})), c0);
-  const avisoExpo = expo.length ? `<div class="banner warn" role="status">Las seguras de este ticket suman más del ${pct(c0.seguras_exposicion_dia_pct,0)} de tu banca en un día (${expo.map(x=>`${esc(ddmm(x.fecha))}: $${x.total.toFixed(2)} de $${x.tope.toFixed(2)}`).join("; ")}). Es solo un aviso: considera apostar menos.</div>` : "";
+  const avisoExpo = expo.length ? avisoHTML("warn","alert","Exposición alta en un día",`Las seguras de este ticket suman más del ${pct(c0.seguras_exposicion_dia_pct,0)} de tu banca en un día (${expo.map(x=>`${ddmm(x.fecha)}: $${x.total.toFixed(2)} de $${x.tope.toFixed(2)}`).join("; ")}). Es solo un aviso: considera apostar menos.`,"status") : "";
   $("#sheetp").innerHTML = `<div class="row"><h1 id="sheet-t" style="font-size:22px">Mi ticket</h1><button class="btn small" id="cerrar">Cerrar</button></div>
     ${avisoExpo}
     ${tabla(`<table><tr><th>Selección</th><th>Cuota</th><th>Monto</th><th><span class="sr">Estado</span></th></tr>${filas}</table>`)}
@@ -438,8 +672,7 @@ $("#vertk").onclick = ()=>{
   $("#cerrar").onclick = cerrarSheet;
   $("#vaciar").onclick = ()=>{ ticket={}; LS.set("ticket",ticket); cerrarSheet(); renderTodo() };
   $("#copiar").onclick = async ()=>{
-    const txt = it.map(s=>`${s.local} vs ${s.visita} — ${s.nombre} (cuota mín. ${c2(s.cuota_minima)})`).join("\n");
-    try{ await navigator.clipboard.writeText(txt); toast("Lista copiada") }catch(e){ toast("No se pudo copiar") }
+    await copiar(it.map(s=>textoPick(s, valorLike(s._t) ? s.cuota_minima : s.cuota_justa)).join("\n\n"));
   };
   $("#registrar").onclick = async ev=>{
     const btn = ev.currentTarget, lote = [], enviados = [];
@@ -518,36 +751,61 @@ async function registrarLote(lote){
 }
 
 // -------------------------------------------------------- PARTIDOS
-let busca = "";
 const PRINCIPALES = [["1x2:1","1"],["1x2:X","X"],["1x2:2","2"],["dc:1X","1X"],["dc:X2","X2"],["btts:si","Ambos marcan"],
   ["ou:1.5:over","+1.5 goles"],["ou:2.5:over","+2.5 goles"],["ou:3.5:over","+3.5 goles"],["ht1x2:X","Empate al descanso"],
   ["corners:9.5:over","+9.5 córners"],["cards:4.5:over","+4.5 tarjetas"]];
+function acuerdoHTML(p){
+  const a = p.acuerdo_1x2 || (p.acuerdo && typeof p.acuerdo==="object" ? p.acuerdo : null);
+  if(!a || typeof a!=="object") return "";
+  const ok = v => Array.isArray(v) && v.length>=3 && v.slice(0,3).every(x=>x!=null && isFinite(+x));
+  const fs = a.fuentes && typeof a.fuentes==="object" ? Object.entries(a.fuentes).filter(([,v])=>ok(v)) : [];
+  if(!fs.length) return "";
+  const mx = v => v.slice(0,3).reduce((m,x,i)=>+x>+v[m]?i:m,0);
+  const fila = (n, v, cls) => { const m = mx(v); return `<tr${cls?` class="${cls}"`:""}><th scope="row">${n}</th>${[0,1,2].map(i=>`<td${i===m?' class="top-p"':""}>${pct(v[i])}</td>`).join("")}</tr>`; };
+  const disp = a.dispersion!=null && isFinite(+a.dispersion) ? `<p class="meta ac-disp">Desacuerdo: ${esc((+a.dispersion*100).toFixed(1))} pts${+a.dispersion>0.08?" (alto)":" (bajo)"}</p>` : "";
+  return `<div class="acuerdo">${tabla(`<table><caption>Acuerdo de fuentes</caption><tr><th scope="col">Fuente</th><th scope="col">Local</th><th scope="col">Empate</th><th scope="col">Visita</th></tr>
+    ${fs.map(([f,v])=>fila(esc(finfo(f)[0]),v)).join("")}${ok(a.consenso)?fila("Consenso",a.consenso,"cons"):""}</table>`)}${disp}</div>`;
+}
+function partidoHTML(p){
+  const pr=p.probs||{}, e=p.esperados||{}, fuentes=p.fuentes||[], sel=p.selecciones||[];
+  const w = x => Math.max(0, Math.min(100, (+x||0)*100));
+  const cor = e.corners||e.corners_fb, tar = e.tarjetas||e.tarjetas_fb;
+  const xg = Array.isArray(p.xg) && p.xg.length>=2 && isFinite(+p.xg[0]) && isFinite(+p.xg[1]) ? `xG ${(+p.xg[0]).toFixed(2)} – ${(+p.xg[1]).toFixed(2)} · ` : "";
+  const tri = [["1x2:1","Local"],["1x2:X","Empate"],["1x2:2","Visita"]];
+  const mayor = tri.reduce((m,[k],i)=> (+pr[k]||0) > (+pr[tri[m][0]]||0) ? i : m, 0);
+  const mios = _porUid.get(String(p.uid)) || [];
+  const tagsPicks = mios.map(s=>`<span class="tag ${s._t==="valor"?"valor":s._t==="locas"?"loca":"ok"}">${ICONO(s._t==="valor"?"diamond":s._t==="locas"?"bolt":"shield")}${s._t==="locas"?"LOCA · ":""}${esc(s.nombre)} · ${pct(s.p)}</span>`).join("");
+  return `<details class="match" data-item>
+    <summary><div class="mh">${esc(horaCorta(p.inicio))}<small>${esc(p.liga)}</small></div><div class="mt">${esc(p.local)}<small>${esc(p.visita)}</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+    <div class="m-body">
+      <div class="p3">${tri.map(([k,n],i)=>`<div${i===mayor&&pr[k]!=null?' class="top-p"':""}><b>${pct(pr[k])}</b><span>${n}</span></div>`).join("")}</div>
+      <div class="bar3" role="img" aria-label="Local ${pct(pr["1x2:1"])}, empate ${pct(pr["1x2:X"])}, visita ${pct(pr["1x2:2"])}"><i style="width:${w(pr["1x2:1"])}%"></i><i style="width:${w(pr["1x2:X"])}%"></i><i style="width:${w(pr["1x2:2"])}%"></i></div>
+      <div class="leyenda" aria-hidden="true"><span><i class="dot l"></i>Local</span><span><i class="dot e"></i>Empate</span><span><i class="dot v"></i>Visita</span></div>
+      <div class="m-extra">${tagsPicks || `<span class="tag">Sin picks con ventaja</span>`}</div>
+      <div class="p3" style="margin-top:12px">${PRINCIPALES.slice(3).filter(([k])=>pr[k]!=null).map(([k,n])=>`<div><b>${pct(pr[k])}</b><span>${esc(n)}</span></div>`).join("")}</div>
+      <div class="meta" style="margin-top:8px">${xg}${cor&&isFinite(+cor)?`córners esperados ${(+cor).toFixed(1)} · `:""}${tar&&isFinite(+tar)?`tarjetas esperadas ${(+tar).toFixed(1)} · `:""}fuentes: ${fuentes.map(f=>esc(finfo(f)[0])).join(", ")}</div>
+      ${acuerdoHTML(p)}${forebetHTML(p)}
+      ${sel.length ? tabla(`<table style="margin-top:8px"><tr><th>Mejores selecciones</th><th>Prob.</th><th>Mín.</th><th>Valor</th></tr>
+      ${sel.slice(0,8).map(s=>`<tr><td>${esc(s.nombre)}<br><span class="meta">${esc(s.mercado)} · ${esc(s.n_fuentes)} fuentes</span></td><td>${pct(s.p)}</td><td>${c2(s.cuota_minima)}</td><td class="${(s.ev||0)>0?"pos":"neg"}">${s.ev==null?"–":pct(s.ev,1)}</td></tr>`).join("")}</table>`) : ""}
+    </div></details>`;
+}
 function vPartidos(){
   const el = $("#v-partidos");
   if(!D.hoy){ el.innerHTML = sinDatosHTML(); return }
-  const filtros = barraFiltros();
-  const ps = D.hoy.partidos.filter(p=>p.fecha===fechaSel && pasaFiltro(p) && (`${p.local} ${p.visita}`.toLowerCase().includes(busca)));
-  const w = x => Math.max(0, Math.min(100, (+x||0)*100));
-  el.innerHTML = filtros + `<label class="sr" for="busca">Buscar equipo</label><input class="search" placeholder="Buscar equipo…" value="${esc(busca)}" id="busca" autocomplete="off">
-    <div class="meta" style="margin:0 2px 6px">${ps.length} partidos</div>
-    ${ps.map(p=>{
-      const pr=p.probs||{}, e=p.esperados||{}, fuentes=p.fuentes||[], sel=p.selecciones||[];
-      const cor = e.corners||e.corners_fb, tar = e.tarjetas||e.tarjetas_fb;
-      const xg = Array.isArray(p.xg) && p.xg.length>=2 && isFinite(+p.xg[0]) && isFinite(+p.xg[1]) ? `xG ${(+p.xg[0]).toFixed(2)} – ${(+p.xg[1]).toFixed(2)} · ` : "";
-      return `<details class="m"><summary>
-        <div class="row meta"><span>${esc(p.liga)}</span><span>${hora(p.inicio)}</span></div>
-        <div class="match">${esc(p.local)} <small>vs</small> ${esc(p.visita)}</div>
-        <div class="bar3" role="img" aria-label="Local ${pct(pr["1x2:1"])}, empate ${pct(pr["1x2:X"])}, visita ${pct(pr["1x2:2"])}">
-          <i style="width:${w(pr["1x2:1"])}%;background:var(--s1)"></i><i style="width:${w(pr["1x2:X"])}%;background:var(--tx3)"></i><i style="width:${w(pr["1x2:2"])}%;background:var(--s2)"></i></div>
-        <div class="row meta" style="margin-top:4px"><span>1 ${pct(pr["1x2:1"])}</span><span>X ${pct(pr["1x2:X"])}</span><span>2 ${pct(pr["1x2:2"])}</span></div>
-      </summary><div class="body">
-        <div class="probs">${PRINCIPALES.filter(([k])=>pr[k]!=null).map(([k,n])=>`<div class="pb">${esc(n)}<b>${pct(pr[k])}</b></div>`).join("")}</div>
-        <div class="meta">${xg}${cor&&isFinite(+cor)?`córners esperados ${(+cor).toFixed(1)} · `:""}${tar&&isFinite(+tar)?`tarjetas esperadas ${(+tar).toFixed(1)} · `:""}fuentes: ${fuentes.map(f=>esc((FUENTE[f]||[f])[0])).join(", ")}</div>
-        ${tabla(`<table style="margin-top:8px"><tr><th>Mejores selecciones</th><th>Prob.</th><th>Mín.</th><th>Valor</th></tr>
-        ${sel.slice(0,8).map(s=>`<tr><td>${esc(s.nombre)}<br><span class="meta">${esc(s.mercado)} · ${esc(s.n_fuentes)} fuentes</span></td><td>${pct(s.p)}</td><td>${c2(s.cuota_minima)}</td><td class="${(s.ev||0)>0?"pos":"neg"}">${s.ev==null?"–":pct(s.ev,1)}</td></tr>`).join("")}</table>`)}
-      </div></details>`}).join("") || `<div class="card empty">Sin partidos con ese filtro.</div>`}`;
-  ligarFiltros(el, vPartidos);
-  $("#busca").oninput = e=>{ busca=e.target.value.toLowerCase(); const pos=e.target.selectionStart; vPartidos(); const b=$("#busca"); b.focus(); b.setSelectionRange(pos,pos) };
+  if(!fechasVigentes(D.hoy.fechas, hoyEC()).length){ el.innerHTML = vacioHTML("alert","Los datos son de fechas pasadas.","No hay partidos de hoy en adelante."); return }
+  el.innerHTML = `<div id="p-fil">${filtrosHTML("p")}</div>${buscaHTML("p")}<p class="meta cnt" id="p-cnt" aria-live="polite"></p><div id="p-lista"></div>`;
+  ligarFiltros("p", pintarPartidos);
+  pintarPartidos();
+}
+// Pinta SOLO la lista de partidos (primeros LIM0, el resto con "Ver más"); no toca filtros ni el campo de búsqueda.
+function pintarPartidos(){
+  const lista = $("#p-lista"); if(!lista || !D.hoy) return;
+  todosPicks();
+  const all = D.hoy.partidos.filter(p=>p.fecha===fechaSel && pasaFiltro(p) && pasaBusca(p)).sort((a,b)=>(Date.parse(a.inicio)||0)-(Date.parse(b.inicio)||0));
+  const tope = Math.min(lim.p, all.length);
+  $("#p-cnt").textContent = `${all.length} ${all.length===1?"partido":"partidos"}`;
+  lista.innerHTML = (tope ? all.slice(0,tope).map(partidoHTML).join("") : vacioHTML("search","Sin partidos con ese filtro","Prueba con otro equipo, liga o fecha."))
+    + (all.length>tope ? `<div class="vermas"><button class="btn ghost" data-vermas="p">Ver más (${all.length-tope} de ${all.length})</button></div>` : "");
 }
 
 // ------------------------------------------------------------ gráfico
@@ -562,7 +820,7 @@ function lineChart(cont, series, opts={}){
   for(let v=Math.ceil(lo/st)*st; v<=hi; v+=st) ticks.push(+v.toFixed(6));
   let g = ticks.map(v=>`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1" ${v===0?'':'stroke-dasharray="2 4"'}/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="var(--tx3)">${opts.fmt?opts.fmt(v):v}</text>`).join("");
   const xl=[0,Math.floor((xs.length-1)/2),xs.length-1].filter((v,i,a)=>a.indexOf(v)===i);
-  g += xl.map(i=>`<text x="${X(i)}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--tx3)">${xs[i].slice(5).split("-").reverse().join("/")}</text>`).join("");
+  g += xl.map(i=>`<text x="${X(i)}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--tx3)">${esc(xs[i].slice(5).split("-").reverse().join("/"))}</text>`).join("");
   g += series.map(s=>`<path d="${s.pts.map((p,j)=>(j?"L":"M")+X(xi[p.f]).toFixed(1)+" "+Y(p.u).toFixed(1)).join("")}" fill="none" stroke="var(${s.color})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join("");
   if(series.length>1) g += series.map(s=>{ const p=s.pts[s.pts.length-1]; return `<text x="${X(xi[p.f])-4}" y="${Y(p.u)-8}" text-anchor="end" font-size="11.5" font-weight="650" fill="var(--tx2)">${esc(s.name)}</text>` }).join("");
   cont.innerHTML = (series.length>1? `<div class="legend">${series.map(s=>`<span><span class="dot" style="background:var(${s.color})"></span> ${esc(s.name)}</span>`).join("")}</div>`:"")
@@ -574,8 +832,8 @@ function lineChart(cont, series, opts={}){
     cx.setAttribute("x1",X(i)); cx.setAttribute("x2",X(i)); cx.setAttribute("visibility","visible");
     const filas=series.map((s,j)=>{ const p=[...s.pts].reverse().find(p=>p.f<=f); const c=svg.querySelector(".cd"+j);
       if(p&&p.f===f){ c.setAttribute("cx",X(i)); c.setAttribute("cy",Y(p.u)); c.setAttribute("visibility","visible") } else c.setAttribute("visibility","hidden");
-      return p? `${series.length>1?esc(s.name)+": ":""}${opts.fmt?opts.fmt(p.u):p.u}`:"" }).filter(Boolean);
-    tip.innerHTML=`${f.split("-").reverse().join("/")}<br><b>${filas.join("<br>")}</b>`; tip.style.display="block";
+      return p? `${series.length>1?esc(s.name)+": ":""}${esc(opts.fmt?opts.fmt(p.u):p.u)}`:"" }).filter(Boolean);
+    tip.innerHTML=`${esc(f.split("-").reverse().join("/"))}<br><b>${filas.join("<br>")}</b>`; tip.style.display="block";
     tip.style.left=(X(i)/W*r.width)+"px"; tip.style.top=(m.t/H*r.height+18)+"px";
   };
   svg.addEventListener("mousemove",mover); svg.addEventListener("touchmove",mover,{passive:true}); svg.addEventListener("touchstart",mover,{passive:true});
@@ -599,15 +857,15 @@ function vRend(){
       ${["por_tipo","por_mercado"].filter(f=>Object.keys(r[f]||{}).length).map(f=>tabla(`<div class="card"><table><tr><th>${f==="por_tipo"?"Tipo":"Mercado"}</th><th>N</th><th>Rendimiento</th></tr>
       ${Object.entries(r[f]).sort((a,b)=>b[1].n-a[1].n).map(([k,v])=>{ const q=roiDe(v); return `<tr><td>${esc(k)}</td><td>${esc(v.n)}</td><td class="${clsN(q)}">${q==null?"–":(q*100).toFixed(1)+"%"}</td></tr>` }).join("")}</table></div>`)).join("")}`;
   }
-  const pend = (H?.picks||[]).filter(p=>p.estado==="pendiente" && p.tipo==="valor");
+  const pend = (H?.picks||[]).filter(p=>p.estado==="pendiente" && valorLike(p.tipo));
   h += `<h2>Pendientes (${pend.length})</h2>` + (pend.length? `<div class="card">${tabla(`<table><tr><th>Pick</th><th>Cuota</th><th>Monto</th><th><span class="sr">Acción</span></th></tr>${pend.map(p=>{
-      const k=key(p,"valor"), loc=hechos[k];
+      const k=key(p,p.tipo), loc=hechos[k];
       const monto = loc?.monto;   // el monto ya no se publica: solo el local
       return `<tr><td><b>${esc(p.nombre)}</b><br><span class="meta">${esc(p.local)} vs ${esc(p.visita)} · ${hora(p.inicio)}</span></td>
       <td>${c2(loc?.cuota ?? p.cuota_tomada ?? p.cuota_minima)}${(loc||p.cuota_tomada)?"":'<br><span class="meta">mín.</span>'}</td><td>${monto==null?"–":usdn(monto)}</td>
       <td>${loc?.estado==="omitida"?'<span class="meta">omitida</span>':`<button class="btn small" data-omit="${esc(k)}">No aposté</button>`}</td></tr>`}).join("")}</table>`)}
       <div class="meta" style="margin-top:8px">Si no registras la cuota, el sistema asume la cuota mínima. Toca "No aposté" para excluirla de tu rendimiento.</div></div>` : `<div class="card empty">Nada pendiente.</div>`);
-  const liq = (H?.picks||[]).filter(p=>["ganada","perdida","nula"].includes(p.estado) && p.tipo==="valor").slice(0,30);
+  const liq = (H?.picks||[]).filter(p=>["ganada","perdida","nula"].includes(p.estado) && valorLike(p.tipo)).slice(0,30);
   if(liq.length) h += `<h2>Últimas liquidadas</h2><div class="card">${tabla(`<table><tr><th>Pick</th><th>Cuota</th><th>Resultado</th></tr>${liq.map(p=>{
       const u = p.u!=null ? +p.u : null;
       return `<tr><td>${esc(p.nombre)}<br><span class="meta">${esc(p.local)} vs ${esc(p.visita)}</span></td><td>${c2(p.cuota_tomada)}</td><td class="${u>0?"pos":u<0?"neg":""}">${p.estado==="nula"?"Devuelta":u!=null?fmtU(u):"–"}</td></tr>`}).join("")}</table>`)}</div>`;
@@ -664,7 +922,7 @@ function vRend(){
 function vFuentes(){
   const el=$("#v-fuentes"), F=D.fuentes;
   if(!F){ el.innerHTML=`<div class="card empty">${EST.fuentes==="red"?"Sin conexión: no se pudieron cargar las fuentes.":"Aún no hay datos de fuentes."}</div>`; return }
-  const orden=["mercado","modelo","forebet","apifootball"], fam=F.familias||{};
+  const orden=["mercado","modelo","forebet","apifootball","penaltyblog","elo"], fam=F.familias||{};
   let h = `<div class="note">El sistema mide el error de cada fuente en cada mercado y ajusta solo su peso: la que más acierta pesa más.</div>
     <h2>Peso actual de cada fuente</h2><div class="card"><div class="legend" style="flex-wrap:wrap">${orden.map(f=>`<span><span class="dot" style="background:var(${FUENTE[f][1]})"></span> ${esc(FUENTE[f][0])}</span>`).join("")}</div>
     ${Object.entries(F.pesos||{}).map(([fa,w])=>`<div style="margin-top:10px"><div class="row"><span style="font-size:13px">${esc(fam[fa]||fa)}</span></div>
@@ -672,7 +930,7 @@ function vFuentes(){
   const cal=Array.isArray(F.calibracion)?F.calibracion:[];
   if(cal.length){
     const fams=[...new Set(cal.map(c=>c.familia))], fs=[...new Set(cal.map(c=>c.fuente))].sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
-    h += `<h2>Error de cada fuente (Brier: más bajo = mejor)</h2><div class="card">${tabla(`<table><tr><th>Mercado</th>${fs.map(f=>`<th>${esc((FUENTE[f]||[f])[0])}</th>`).join("")}</tr>
+    h += `<h2>Error de cada fuente (Brier: más bajo = mejor)</h2><div class="card">${tabla(`<table><tr><th>Mercado</th>${fs.map(f=>`<th>${esc(finfo(f)[0])}</th>`).join("")}</tr>
       ${fams.map(fa=>{ const vals=cal.filter(c=>c.familia===fa), best=Math.min(...vals.map(v=>v.brier));
         return `<tr><td>${esc(fam[fa]||fa)}</td>${fs.map(f=>{const c=vals.find(v=>v.fuente===f); return `<td>${c?`<b style="${c.brier===best?"color:var(--good)":""}">${isFinite(+c.brier)?(+c.brier).toFixed(3):"–"}</b><br><span class="meta">n=${esc(c.n)}</span>`:"–"}</td>`}).join("")}</tr>`}).join("")}</table>`)}</div>`;
   } else h += `<div class="card empty">El error se empieza a medir cuando terminan los primeros partidos.</div>`;
@@ -683,7 +941,10 @@ function vFuentes(){
 function vAjustes(){
   const c=cfg();
   $("#v-ajustes").innerHTML = `
-    <h2 style="margin-top:4px">Conexión con tu sistema</h2><div class="card">
+    <h2 style="margin-top:4px">Apariencia</h2><div class="panel"><b id="tema-t">Tema</b>
+    <div class="temas" role="group" aria-labelledby="tema-t">${[["auto","Automático"],["claro","Claro"],["oscuro","Oscuro"]].map(([v,t])=>`<button type="button" data-elegir-tema="${v}" aria-pressed="${tema===v}">${t}</button>`).join("")}</div>
+    <p class="meta" style="margin-top:8px">Automático sigue el modo claro u oscuro del teléfono. Se guarda solo en este navegador.</p></div>
+    <h2>Conexión con tu sistema</h2><div class="card">
     <div class="meta">Para registrar apuestas y correr el análisis desde aquí. Los datos se guardan solo en este navegador (almacenamiento local), sin cifrar.</div>
     <label class="field"><span>Usuario u organización de GitHub</span><input id="a-owner" value="${esc(ajustes.owner)}" autocomplete="off" autocapitalize="off"></label>
     <label class="field"><span>Repositorio</span><input id="a-repo" value="${esc(ajustes.repo)}" autocomplete="off" autocapitalize="off"></label>
@@ -704,6 +965,10 @@ function vAjustes(){
       <div class="meta" style="margin-top:8px">Se cambian en <code>config.yaml</code>.</div></div>
     <h2>Instalar en el celular</h2><div class="card"><div class="meta">iPhone: Safari → Compartir → <b>Agregar a inicio</b>. Android: Chrome → ⋮ → <b>Instalar app</b>.</div></div>
     <div class="note">Ningún sistema garantiza ganancias. Apuesta solo dinero que puedas perder. Si apuestas para recuperar pérdidas, para.</div>`;
+  document.querySelectorAll("[data-elegir-tema]").forEach(b=>b.onclick=()=>{
+    tema = b.dataset.elegirTema; LS.set("tema", tema); aplicarTema();
+    document.querySelectorAll("[data-elegir-tema]").forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+  });
   $("#a-ver").onclick=e=>{ const i=$("#a-token"), ver=i.type==="password"; i.type=ver?"text":"password"; e.currentTarget.textContent=ver?"Ocultar":"Mostrar"; e.currentTarget.setAttribute("aria-pressed",ver) };
   $("#a-guardar").onclick=()=>{
     const owner=$("#a-owner").value.trim(), repo=$("#a-repo").value.trim(), ref=($("#a-ref").value.trim()||"main"), tk=$("#a-token").value.trim();
@@ -721,7 +986,7 @@ function vAjustes(){
 // ------------------------------------------------------------- navegación
 const TIT={hoy:"Hoy",partidos:"Partidos",rend:"Rendimiento",fuentes:"Fuentes",ajustes:"Ajustes"};
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll("nav button").forEach(x=>{ x.classList.toggle("on",x===b); if(x===b) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current") });
+  document.querySelectorAll("nav button").forEach(x=>{ if(x===b) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current") });
   Object.keys(TIT).forEach(v=>$("#v-"+v).classList.toggle("hide",v!==b.dataset.v));
   $("#titulo").textContent=TIT[b.dataset.v]; window.scrollTo(0,0);
   ({hoy:vHoy,partidos:vPartidos,rend:vRend,fuentes:vFuentes,ajustes:vAjustes})[b.dataset.v](); barra();

@@ -76,7 +76,14 @@ pesos_iniciales:
   penaltyblog: 0.10   # Poisson bivariado de la librería penaltyblog
   forebet: 0.20
   apifootball: 0.05
+  elo: 0.10           # ClubElo (gratis, sin clave): ratings Elo -> 1X2/dc/dnb. Fuente independiente de los modelos de
+                      # goles; peso moderado (solo Europa y solo 1X2) y se ajusta por log-loss como las demás
   ia: 0.05            # analista de IA (Groq) — solo en los picks que revisa
+
+# --- ClubElo (ratings Elo gratis, sin clave; http://clubelo.com/API) ----------------------------
+elo_activo: true
+elo_ventaja_local: 65         # puntos Elo de ventaja del local
+elo_p_empate_max: 0.26        # prob. de empate entre equipos parejos (decrece con la diferencia de Elo)
 
 # --- Analista de IA (Groq) -----------------------------------------------------
 # Clave gratis en https://console.groq.com (variable GROQ_API_KEY)
@@ -94,13 +101,25 @@ forebet_linea_tarjetas: 4.5   # línea que usa Forebet en su pronóstico de tarj
 max_predicciones_af: 10       # consultas /predictions por día (plan gratis: 100 en total; perfil pro: 40)
 
 # --- Fechas -------------------------------------------------------------------
-dias_adelante: 5              # perfil gratis: hoy + 2 días (perfil pro: 5)
+# Perfil gratis: dias_adelante 1 (hoy y mañana). API-Football gratis solo sirve /fixtures para [ayer, mañana]
+# ("Free plans do not have access to this date"): pedir más días gasta llamadas (10/min) que devuelven error.
+# Con plan de pago (perfil pro) pon 5. En af_plan gratis el motor limita a 1 aunque pongas más.
+dias_adelante: 1
+# Topes de gasto (perfil gratis). max_ligas_analizadas: con incluir_todas_las_ligas el motor no analiza cientos
+# de ligas menores; prioriza el orden de `ligas:` y luego el resto (por defecto 25 en gratis, sin tope en pro).
+max_ligas_analizadas: 25
+# The Odds API gratis = 500 créditos/mes. Cada liga consultada cuesta ~2 créditos (h2h + totals, 1 región):
+# 2 corridas/día x 4 llamadas x ~2 créditos x 30 días ~ 480 créditos/mes. Tope de ligas consultadas POR CORRIDA
+# (primero las que juegan hoy, luego el orden de `ligas:`); resultados en caché 12 horas (la 2.ª corrida del día
+# reutiliza la 1.ª). Nombre anterior `odds_max_llamadas_dia`: se sigue aceptando por compatibilidad.
+odds_max_llamadas_corrida: 4
 max_picks_dia: 8              # por cada día
 
 # --- Ligas ------------------------------------------------------------------
 # Modo "todas": además de la lista, analiza CUALQUIER liga que API-Football tenga
 # para esas fechas en los países/regiones de abajo (fuentes: cuotas + Forebet + IA).
-incluir_todas_las_ligas: true   # perfil gratis: solo la lista de abajo (perfil pro: true)
+incluir_todas_las_ligas: true   # además de la lista, analiza otras ligas de las regiones elegidas; en plan gratis
+                                # el tope `max_ligas_analizadas` (arriba) limita cuántas se analizan
 regiones_todas: [Europa, Sudamérica, Norteamérica]
 # Con muchas ligas se usan más consultas: el plan Pro de API-Football (7 500/día) es lo recomendado.
 
@@ -116,6 +135,8 @@ ligas:        # 41 ligas: las 11 principales y, a continuación, las de "ampliac
   - {nombre: Champions League,   region: Europa, af: 2,   odds_key: soccer_uefa_champs_league}
   - {nombre: Europa League,      region: Europa, af: 3,   odds_key: soccer_uefa_europa_league}
   - {nombre: MLS,                region: Norteamérica, af: 253, odds_key: soccer_usa_mls,            fd: USA, tipo: extra}
+  # LigaPro Ecuador: SIN odds_key (no se verificó que The Odds API tenga ese torneo; no se inventa una clave).
+  # Sin cuotas de casas no hay fuente 'mercado' ni cuota real -> no genera picks de Valor (sí Seguras con cuota estimada).
   - {nombre: LigaPro Ecuador,    region: Sudamérica, af: 242}
   - {nombre: Libertadores,       region: Sudamérica, af: 13,  odds_key: soccer_conmebol_copa_libertadores}
   - {nombre: Sudamericana,       region: Sudamérica, af: 11,  odds_key: soccer_conmebol_copa_sudamericana}
@@ -162,3 +183,17 @@ perfil_pro:
   incluir_todas_las_ligas: true
   max_predicciones_af: 40
   ligas: "ligas + ligas_extra"
+
+# --- Locas: simples de ALTO RIESGO y alto pago (se gana pocas veces; stake mínimo) --------------------
+# Solo con cuota REAL de casas (cuota_ecuabet o mejor cuota de The Odds API/API-Football). Sin ella no hay Locas:
+# las cuotas estimadas o las de referencia de Forebet nunca se usan para su EV. Exigen el mismo consenso que Valor.
+locas_cuota_min: 3.0
+locas_cuota_max: 12
+locas_prob_min: 0.12
+locas_ev_min: 0.10
+locas_stake_pct: 0.005        # 0.5% de la banca por Loca (nunca menos que stake_minimo)
+locas_max_dia: 3
+locas_exposicion_dia_pct: 0.015   # tope diario de Locas: 1.5% de la banca
+
+# Forebet (Apify) es asíncrono: se sondea el run cada ~10 s hasta este máximo; si se agota, se aborta y se sigue sin Forebet
+forebet_espera_max_seg: 480   # 8 minutos

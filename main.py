@@ -19,11 +19,12 @@ import sys
 
 import requests
 
+from picks.errores import describir
 from picks import backtest, config, exportar, niveles, pipeline, report, seleccion, tracker
 from picks.fuentes.apifootball import APIFootball
 from picks.fuentes.forebet import Forebet
 from picks.fuentes.ia import AnalistaIA
-from picks.fuentes.oddsapi import OddsAPI
+from picks.fuentes.oddsapi import OddsAPI, tope_corrida
 
 
 def telegram(msg: str):
@@ -34,14 +35,15 @@ def telegram(msg: str):
                           data={"chat_id": chat, "text": msg[:4000]}, timeout=20).raise_for_status()
             print("✓ Enviado a Telegram")
         except Exception as ex:  # noqa: BLE001
-            print(f"! Telegram: {ex}")
+            print(f"! Telegram: {describir(ex)}")   # nunca {ex}: la URL lleva el token del bot
 
 
 def clientes(cfg):
     if not cfg["api_football_key"]:
         sys.exit("Falta API_FOOTBALL_KEY (gratis en https://dashboard.api-football.com).")
-    return (APIFootball(cfg["api_football_key"]), OddsAPI(cfg["odds_api_key"]),
-            Forebet(cfg["apify_token"], linea_tarjetas=cfg["forebet_linea_tarjetas"]))
+    return (APIFootball(cfg["api_football_key"]), OddsAPI(cfg["odds_api_key"], max_llamadas=tope_corrida(cfg)),
+            Forebet(cfg["apify_token"], linea_tarjetas=cfg["forebet_linea_tarjetas"],
+                    espera_max_seg=cfg.get("forebet_espera_max_seg", 480)))
 
 
 def hoy(cfg):
@@ -57,15 +59,14 @@ def hoy(cfg):
     dias = pipeline.picks_por_dia(partidos, cfg)
     ia = AnalistaIA(cfg["groq_api_key"], cfg.get("ia_modelo", "groq/compound"), cfg.get("ia_max_consultas", 15))
     if ia.activa and dias:
-        proximos = sorted(dias)[:2]            # la IA revisa hoy y mañana (las noticias cambian)
-        candidatos = [x for f in proximos for x in dias[f]["valor"] + dias[f]["seguras"]
-                      + [p for c in dias[f]["grandes"] for p in c["piernas"]]]
+        candidatos = pipeline.candidatos_ia(dias)   # la IA revisa hoy y mañana (las noticias cambian), con las Locas
         print(f"IA (Groq): {ia.revisar(partidos, candidatos, cfg)} picks revisados")
         dias = pipeline.picks_por_dia(partidos, cfg)
     tracker.guardar_predicciones(partidos)
     for d in dias.values():
         tracker.agregar_picks(d["valor"], "valor")
         tracker.agregar_picks(d["alta"], "alta")
+        tracker.agregar_picks(d.get("locas", []), "locas")
         tracker.agregar_picks([{**x, "cuota_ecuabet": None, "monto": 0} for x in d["seguras"]], "segura")
     res, calib = tracker.resumen(), tracker.calibracion()
     creditos = f"API-Football: {af.restantes} · Odds API: {odds.restantes}"
@@ -74,11 +75,12 @@ def hoy(cfg):
     del_hoy = [p for p in partidos if p["fecha"] == hoy_f]
     h, t = report.guardar(d0["valor"], d0["alta"], del_hoy, cfg, res, calib, creditos)
     info = getattr(partidos, "info", None) or {}
-    estado = {**info, "cuota_agotada": bool(info.get("cuota_agotada") or getattr(af, "sin_cuota", False))}
+    estado = {**info, "cuota_agotada": bool(info.get("cuota_agotada") or getattr(af, "sin_cuota", False)),
+              "ia": bool(ia.activa)}
     exportar.hoy(partidos, dias, cfg, creditos, estado=estado)
     exportar.historial()
     exportar.fuentes(cfg)
-    msg = t.read_text(encoding="utf-8") + report.texto_niveles(d0["seguras"], d0["grandes"])
+    msg = t.read_text(encoding="utf-8") + report.texto_niveles(d0["seguras"], d0["grandes"], d0.get("locas"))
     otros = [f"{f}: {len(d['seguras'])} seguras, {len(d['valor'])} de valor" for f, d in dias.items() if f != hoy_f]
     if otros:
         msg += "\n\n📅 Próximos días (en la app):\n" + "\n".join(otros)
@@ -95,6 +97,11 @@ def _http(url, **kw):
         return r.ok, r.status_code
     except requests.RequestException as ex:
         return False, type(ex).__name__
+
+
+def _apify_valido(token: str):
+    """Comprueba el token de Apify; va en la cabecera Authorization (nunca en la URL)."""
+    return _http("https://api.apify.com/v2/users/me", headers={"Authorization": f"Bearer {token}"})
 
 
 def verificar(cfg):
@@ -116,7 +123,7 @@ def verificar(cfg):
         ligas = {l["league"]["id"]: (l["country"]["name"], l["league"]["name"])
                  for l in af._get("/leagues", cache_horas=24, current="true").get("response", [])}
     except Exception as ex:  # noqa: BLE001
-        print(f"✘ API-Football falló: {type(ex).__name__}: {ex}")
+        print(f"✘ API-Football falló: {describir(ex)}")
         return False
     for lg in cfg["ligas"]:
         real = ligas.get(lg.get("af"))
@@ -135,7 +142,7 @@ def verificar(cfg):
     else:
         print("· The Odds API: sin clave (opcional)")
     if cfg["apify_token"]:
-        bien, det = _http("https://api.apify.com/v2/users/me", params={"token": cfg["apify_token"]})
+        bien, det = _apify_valido(cfg["apify_token"])
         print("✔ Apify (Forebet): token válido" if bien else f"✘ Apify: token inválido ({det})")
         ok &= bien
     else:
@@ -268,7 +275,7 @@ def main():
         try:
             exportar.historial()
         except Exception as ex:  # noqa: BLE001 - un fallo al exportar no debe ocultar el código del lote
-            print(f"! historial no exportado: {type(ex).__name__}: {ex}")
+            print(f"! historial no exportado: {describir(ex)}")
             codigo = codigo or 1
         sys.exit(codigo)
     elif cmd == "backtest":

@@ -1,6 +1,7 @@
 """Modelo de goles de la librería penaltyblog (Poisson bivariado), como fuente independiente."""
 import pandas as pd
 
+from ..errores import describir
 from .goles import mercados_desde_goles
 
 try:
@@ -25,7 +26,7 @@ class ModeloPB:
             self.equipos = sorted(set(df["local"]) | set(df["visita"]))
             self.ok = True
         except Exception as e:  # noqa: BLE001
-            print(f"  ! penaltyblog: {e}")
+            print(f"  ! penaltyblog: {describir(e)}")
         return self
 
     def mercados(self, local: str, visita: str) -> dict | None:

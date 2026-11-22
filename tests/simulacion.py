@@ -219,13 +219,15 @@ cfg = config.cargar()
 cfg["ligas"] = [cfg["ligas"][0]]
 af, fb, odds = FakeAF(), None, OddsAPI("")
 fb = FakeForebet(af)
+# ClubElo falso: Elo según la fuerza real (ataque - defensa) con ruido, para ejercitar la fuente "elo" sin internet
+ELO_FALSO = {e: 1500 + 600 * (T[e]["at"] - T[e]["de"]) + rng.normal(0, 40) for e in EQ}
 import contextlib, io  # noqa: E401
 inicio_sim = datetime.now(timezone.utc)
 for dia in range(25):
     ahora = inicio_sim + timedelta(days=dia)
     af.nuevo_dia(ahora)
     with contextlib.redirect_stdout(io.StringIO() if dia else sys.stdout):
-        partidos = pipeline.analizar(cfg, af, odds, fb, ahora)
+        partidos = pipeline.analizar(cfg, af, odds, fb, ahora, elo_ratings=ELO_FALSO)
         dias = pipeline.picks_por_dia(partidos, cfg)
         valor = [x for d in dias.values() for x in d["valor"]]
         alta = [x for d in dias.values() for x in d["alta"]]

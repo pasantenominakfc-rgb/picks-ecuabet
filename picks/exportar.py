@@ -3,6 +3,7 @@ import json
 import math
 import os
 from datetime import datetime
+from statistics import pstdev
 from zoneinfo import ZoneInfo
 
 from . import ensamble, mercados as M, niveles, tracker
@@ -66,6 +67,34 @@ def _grande(c: dict) -> dict:
             "ev_estimado": c.get("ev_estimado"), "cuota_es_estimada": c.get("cuota_es_estimada"), "piernas": [_sel(s) for s in c["piernas"]]}
 
 
+_CTX_CUOTAS = ("1", "X", "2", "o25", "u25", "btts_si", "btts_no")
+
+
+def _txt(x):
+    """Texto corto sin caracteres de control (la web lo escapa al pintarlo)."""
+    if not isinstance(x, str):
+        return None
+    t = "".join(" " if ord(c) < 32 or ord(c) == 127 else c for c in x).strip()[:200]
+    return t or None
+
+
+def _num(x):
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
+
+
+def _ctx(c):
+    """Contexto de Forebet para la web (informativo). Las cuotas son REFERENCIA ESTIMADA: no son de Ecuabet."""
+    if not isinstance(c, dict):
+        return None
+    f, p, q = (c.get("forma") or {}), (c.get("posicion") or {}), (c.get("cuotas_ref") or {})
+    return {"forma": {"local": _txt(f.get("local")), "visita": _txt(f.get("visita"))},
+            "posicion": {k: (p.get(k) if isinstance(p.get(k), int) and not isinstance(p.get(k), bool) else None)
+                         for k in ("local", "visita")},
+            "tendencia": _txt(c.get("tendencia")), "marcador_previsto": _txt(c.get("marcador_previsto")),
+            "goles_prom": _num(c.get("goles_prom")), "valor_pct": _num(c.get("valor_pct")), "clima": _txt(c.get("clima")),
+            "cuotas_ref": {k: _num(q.get(k)) for k in _CTX_CUOTAS}}
+
+
 def _aviso(estado: dict | None) -> str | None:
     estado = estado or {}
     sin = estado.get("ligas_sin_datos")
@@ -73,6 +102,41 @@ def _aviso(estado: dict | None) -> str | None:
     if estado.get("cuota_agotada"):
         return "cuota de API agotada" + (f": {n} ligas sin datos" if n else "")
     return f"{n} ligas sin datos" if n else None
+
+
+def fuentes_estado(cfg: dict, estado: dict | None) -> dict:
+    """Qué fuentes hubo en esta corrida (solo bool/int/texto; sin secretos) para que la app avise de lo que falta."""
+    estado = estado or {}
+    cuotas = bool(estado.get("cuotas_casas"))
+    msg = ""
+    if not cuotas:
+        msg = "Sin cuotas de casas: los picks de Valor requieren ODDS_API_KEY"
+        if estado.get("cuotas_af_no_disponibles"):
+            msg += " (el plan gratis de API-Football no da cuotas de esta temporada)"
+    dias_max = estado.get("dias_max")
+    if dias_max is None:
+        dias_max = cfg.get("dias_adelante", 0) or 0
+    return {"cuotas_casas": cuotas, "forebet": bool(estado.get("forebet")), "elo": bool(estado.get("elo")), "ia": bool(estado.get("ia")),
+            "plan_af": str(estado.get("plan_af") or cfg.get("af_plan") or "pro"),
+            "dias_max": int(dias_max), "mensaje": msg}
+
+
+_K1X2 = ("1x2:1", "1x2:X", "1x2:2")
+
+
+def acuerdo_1x2(pa: dict) -> dict | None:
+    """Tabla de acuerdo del 1X2: qué opina cada fuente ([p1, pX, p2], 3 decimales), la dispersión (promedio de la
+    desviación estándar entre fuentes de cada resultado) y el consenso del ensamble. None si ninguna fuente da 1X2.
+    La IA no entra (solo ajusta p)."""
+    fuentes = {n: [round(float(p[k]), 3) for k in _K1X2] for n, p in pa["fuentes"].items()
+               if n != "ia" and all(isinstance(p.get(k), (int, float)) and not isinstance(p.get(k), bool) for k in _K1X2)}
+    if not fuentes:
+        return None
+    crudo = [[float(pa["fuentes"][n][k]) for k in _K1X2] for n in fuentes]
+    disp = sum(pstdev(c[i] for c in crudo) if len(crudo) > 1 else 0.0 for i in range(3)) / 3
+    probs = pa.get("probs") or {}
+    consenso = [round(float(probs[k]["p"]), 3) for k in _K1X2] if all(k in probs for k in _K1X2) else None
+    return {"fuentes": fuentes, "dispersion": round(disp, 3), "consenso": consenso}
 
 
 def hoy(partidos, dias: dict, cfg, creditos, estado: dict | None = None):
@@ -84,7 +148,7 @@ def hoy(partidos, dias: dict, cfg, creditos, estado: dict | None = None):
         lista_partidos.append({
             "uid": pa["uid"], "liga": pa["liga"], "region": pa.get("region"), "fecha": pa["fecha"],
             "inicio": pa["inicio"], "local": pa["local"], "visita": pa["visita"],
-            "fuentes": list(pa["fuentes"]), "xg": pa.get("xg"), "esperados": pa.get("esperados"),
+            "forebet_ctx": _ctx(pa.get("forebet_ctx")), "fuentes": list(pa["fuentes"]), "acuerdo_1x2": acuerdo_1x2(pa), "xg": pa.get("xg"), "esperados": pa.get("esperados"),
             "probs": {k: v["p"] for k, v in pa["probs"].items()},
             "selecciones": [{k: s.get(k) for k in ("clave", "nombre", "mercado", "p", "cuota_justa", "cuota_minima",
                                                    "mejor_cuota", "ev", "n_fuentes", "dispersion", "detalle")}
@@ -96,6 +160,8 @@ def hoy(partidos, dias: dict, cfg, creditos, estado: dict | None = None):
             "valor": [_sel(s) for s in d["valor"]], "alta": [_sel(s) for s in d["alta"]],
             "seguras": [_sel(s) for s in d["seguras"]],
             "grandes": [_grande(c) for c in d["grandes"]],
+            "locas": [{**_sel(s), "nivel": "locas", "stake": cfg.get("locas_stake_pct")} for s in d.get("locas", [])],
+            "combinadas": [_grande(c) for c in d.get("combinadas", [])],
             "combinada": combinada(d["valor"], cfg),
             "pool": [{k: s.get(k) for k in ("uid", "clave", "liga", "region", "fecha", "inicio", "local", "visita",
                                             "nombre", "mercado", "p", "cuota_est", "tipo_cuota", "eficiencia", "ia",
@@ -103,11 +169,12 @@ def hoy(partidos, dias: dict, cfg, creditos, estado: dict | None = None):
     _guardar("hoy.json", {
         "generado": datetime.now(TZ).isoformat(), "creditos": creditos,
         "simulacion": creditos == "simulación" or bool(os.environ.get("PICKS_SIMULACION")),
-        "aviso": _aviso(estado),
+        "aviso": _aviso(estado), "fuentes_estado": fuentes_estado(cfg, estado),
         "config": {k: cfg.get(k) for k in ("fraccion_kelly", "stake_max_pct", "stake_minimo", "exposicion_dia_pct",
                                            "ventaja_minima", "min_fuentes", "max_dispersion", "seguras_stake_pct",
                                            "seguras_prob_min", "seguras_cuota_min", "seguras_cuota_max",
-                                           "grandes_monto", "grandes_objetivos")},
+                                           "grandes_monto", "grandes_objetivos", "locas_stake_pct", "locas_max_dia",
+                                           "locas_exposicion_dia_pct", "locas_cuota_min", "locas_cuota_max")},
         "fechas": sorted(salida_dias), "dias": salida_dias, "partidos": lista_partidos})
 
 
@@ -162,7 +229,7 @@ def fuentes(cfg):
     # qué fuente opina en qué mercado
     goles = {"1x2", "dc", "dnb", "ou", "btts", "tl", "tv", "ah", "ht1x2", "htou"}
     cubre = {"apifootball": {"1x2", "dc"}, "forebet": {"1x2", "ou", "btts", "ht1x2", "dc", "corners", "cards"},
-             "penaltyblog": goles, "ia": set()}
+             "penaltyblog": goles, "elo": {"1x2", "dc", "dnb"}, "ia": set()}
     pesos = {}
     for fam in fams:
         disp = [s for s in cfg["pesos_iniciales"] if (s, fam) in calib or (not calib and fam in cubre.get(s, {fam}))]
@@ -177,3 +244,4 @@ def fuentes(cfg):
 
 def backtest(res: dict):
     _guardar("backtest.json", {"resultado": res, "generado": datetime.now(TZ).isoformat()})
+

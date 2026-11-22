@@ -8,7 +8,7 @@ from .config import REPORTES
 
 TZ = ZoneInfo("America/Guayaquil")
 DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-NOMBRE_FUENTE = {"mercado": "Mercado", "modelo": "Modelo", "forebet": "Forebet", "apifootball": "API-Football",
+NOMBRE_FUENTE = {"mercado": "Mercado", "modelo": "Modelo", "forebet": "Forebet", "apifootball": "API-Football", "elo": "Elo (ClubElo)",
                  "ensamble": "Combinado"}
 e = html.escape
 
@@ -195,8 +195,11 @@ def guardar(valor, alta, partidos, cfg, res, calib, creditos=None):
     return h, t
 
 
-def texto_niveles(seguras, grandes) -> str:
+def texto_niveles(seguras, grandes, locas=None) -> str:
     L = []
+    if locas:
+        L += ["", "⚡ Locas (ALTO RIESGO, se pierden casi siempre; apuesta muy poco):"]
+        L += [f"• {s['local']} vs {s['visita']}: {s['nombre']} ({_pct(s['p'])}, cuota {s['cuota_calc']:.2f}, valor {_pct(s['ev'])})" for s in locas]
     if seguras:
         L += ["", "✅ Seguras (cuota baja, alta probabilidad):"]
         L += [f"• {s['local']} vs {s['visita']}: {s['nombre']} ({_pct(s['p'])}, cuota ~{s['cuota_est']:.2f})"

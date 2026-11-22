@@ -5,8 +5,9 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from .errores import describir
 from . import ensamble, mercados as M, names, niveles, regiones, seleccion, tracker
-from .fuentes import footballdata
+from .fuentes import clubelo, footballdata, oddsapi
 from .modelos.conteos import ModeloConteo
 from .modelos.goles import DixonColes
 from .modelos.pb import ModeloPB
@@ -83,17 +84,32 @@ class Modelos:
         return {k: x for k, x in r.items() if not k.startswith("_")} if r else None
 
 
-def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> ResultadoAnalisis:
+def contexto_forebet(pa: dict, fb: dict | None) -> dict | None:
+    """Contexto informativo (forma, posición, cuotas de REFERENCIA) de la fila de Forebet emparejada; None si no hay.
+    No entra a probabilidades, a 'mercado' ni al conteo de fuentes."""
+    return (fb or {}).get("ctx") or None
+
+
+def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None,
+             elo_ratings: dict | None = None) -> ResultadoAnalisis:
     """Analiza todos los partidos desde ahora hasta el final del día hoy + dias_adelante.
     Devuelve una lista de partidos con el atributo `.info` (ver ResultadoAnalisis). Una liga que falla
     se registra y se salta; nunca aborta todo el análisis."""
     ahora = ahora or datetime.now(timezone.utc)
-    info = {"cuota_agotada": False, "ligas_sin_datos": [], "ligas_fallidas": []}
+    info = {"cuota_agotada": False, "ligas_sin_datos": [], "ligas_fallidas": [], "cuotas_af_no_disponibles": False,
+            "cuotas_casas": False, "forebet": False, "ligas_omitidas_por_tope": 0}
     if af is not None and hasattr(af, "max_por_minuto"):   # plan gratis de API-Football: 10 peticiones/minuto
         af.max_por_minuto = cfg.get("af_max_por_minuto", 10)
     dias = cfg.get("dias_adelante", 5)
     hoy_local = ahora.astimezone(TZ).date()
+    gratis = str(cfg.get("af_plan", "")).strip().lower() == "gratis"
+    if gratis:   # el plan gratis solo sirve /fixtures para [ayer, mañana]: más días gastan llamadas inútiles
+        dias = min(dias, 1)
+    if af is not None and hasattr(af, "configurar_plan"):
+        af.configurar_plan(cfg.get("af_plan", "pro"), hoy_local)
     fechas = [(hoy_local + timedelta(days=d)).isoformat() for d in range(dias + 1)]
+    info["plan_af"] = "gratis" if gratis else "pro"
+    info["dias_max"] = dias
     fin = datetime.combine(hoy_local + timedelta(days=dias + 1), datetime.min.time(), TZ).astimezone(timezone.utc)
     ligas_af = {l["af"]: l for l in cfg["ligas"] if l.get("af")}
     todas = cfg.get("incluir_todas_las_ligas", False)
@@ -106,8 +122,8 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
             try:
                 fixtures += af.partidos(f, None if todas else set(ligas_af))
             except Exception as e:  # noqa: BLE001
-                print(f"  ! partidos del {f}: {e}")
-                info["ligas_fallidas"].append({"liga": f"(fixtures {f})", "error": str(e)})
+                print(f"  ! partidos del {f}: {describir(e)}")
+                info["ligas_fallidas"].append({"liga": f"(fixtures {f})", "error": describir(e)})
     fixtures = [f for f in fixtures if f["estado"] in ("NS", "TBD")
                 and ahora <= datetime.fromisoformat(f["inicio"]).astimezone(timezone.utc) < fin]
     if todas:  # ligas que no están en la lista: se agregan si son de las regiones elegidas
@@ -122,15 +138,35 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
 
     # 2) fuentes externas una sola vez
     fb_filas = forebet.predicciones(dias + 1) if forebet and forebet.activa else []
+    info["forebet"] = bool(fb_filas)
     print(f"Forebet: {len(fb_filas)} pronósticos")
+    # ClubElo: ratings de hoy (una descarga por día, tolerante a fallos). `elo_ratings` permite inyectarlos (pruebas).
+    if elo_ratings is None:
+        elo_ratings = clubelo.descargar(hoy_local) if cfg.get("elo_activo", True) else {}
+    info["elo"] = bool(elo_ratings)
+    print(f"ClubElo: {len(elo_ratings)} clubes")
     calib = tracker.calibracion()
     prior = cfg["pesos_iniciales"]
 
+    # ligas a analizar: solo con partidos; primero las de la lista de cfg (orden de cfg["ligas"]), luego el resto, con tope
+    por_liga = {}
+    for f in fixtures:
+        por_liga.setdefault(f["liga_id"], []).append(f)
+    ids_cfg = [l["af"] for l in cfg["ligas"] if l.get("af")]
+    orden = [i for i in ids_cfg if i in por_liga] + [i for i in ligas_af if i not in ids_cfg and i in por_liga]
+    tope = cfg.get("max_ligas_analizadas", 25 if gratis else None)
+    if tope is not None and len(orden) > int(tope):
+        info["ligas_omitidas_por_tope"] = len(orden) - int(tope)
+        print(f"Tope max_ligas_analizadas={tope}: se omiten {len(orden) - int(tope)} ligas menores")
+        orden = orden[:int(tope)]
+    # presupuesto de The Odds API: las ligas con partidos hoy primero (estable: conserva el orden de cfg)
+    orden.sort(key=lambda i: not any(f["inicio"][:10] == fechas[0] for f in por_liga[i]))
+    max_odds = oddsapi.tope_corrida(cfg)
+    con_odds = [i for i in orden if ligas_af[i].get("odds_key")][:max_odds]
+
     partidos, n_pred_af = [], 0
-    for liga_id, liga in ligas_af.items():
-        fx_liga = [f for f in fixtures if f["liga_id"] == liga_id]
-        if not fx_liga:
-            continue
+    for liga_id in orden:
+        liga, fx_liga = ligas_af[liga_id], por_liga[liga_id]
         print(f"→ {liga['nombre']}: {len(fx_liga)} partidos")
         antes = len(partidos)
         try:
@@ -140,7 +176,7 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
             for d in sorted({f["inicio"][:10] for f in fx_liga}):
                 cuotas_af |= af.cuotas_liga(liga_id, temporada, d)
             eventos_odds = odds.cuotas(liga["odds_key"], 24 * (dias + 1)) if odds and odds.activa and \
-                liga.get("odds_key") else []
+                liga_id in con_odds else []
 
             for fx in fx_liga:
                 casas = {k: dict(v) for k, v in cuotas_af.get(fx["af_id"], {}).items()}
@@ -152,6 +188,7 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
                 mkt = ensamble.probs_mercado(casas, cfg["casas_afiladas"], {cfg["casa_objetivo"]})
                 if mkt:
                     fuentes["mercado"] = mkt
+                    info["cuotas_casas"] = True
                 pm, esperados = modelos.probs(fx["local"], fx["visita"])
                 if pm:
                     fuentes["modelo"] = {k: v for k, v in pm.items() if not k.startswith("_")}
@@ -165,6 +202,12 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
                     for meta, nombre in (("_corners", "corners_fb"), ("_tarjetas", "tarjetas_fb")):
                         if meta in fb["probs"]:
                             esperados[nombre] = fb["probs"][meta]
+                # ClubElo solo cubre bien clubes europeos: fuera de Europa hay homónimos (Barcelona SC, Atletico-MG, Liverpool de Uruguay)
+                if elo_ratings and liga.get("region") == "Europa":   # solo si se encuentran AMBOS equipos
+                    el, ev_ = clubelo.buscar_elo(fx["local"], elo_ratings), clubelo.buscar_elo(fx["visita"], elo_ratings)
+                    if el is not None and ev_ is not None:
+                        fuentes["elo"] = clubelo.probs_desde_elo(el, ev_, cfg.get("elo_ventaja_local", clubelo.VENTAJA_LOCAL),
+                                                                 cfg.get("elo_p_empate_max", clubelo.P_EMPATE_MAX))
                 if af and af.activa and n_pred_af < cfg["max_predicciones_af"]:
                     pa = af.prediccion(fx["af_id"])
                     n_pred_af += 1
@@ -177,16 +220,23 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
                     "region": liga.get("region") or regiones.region(fx.get("pais"), fx.get("liga", "")),
                     "inicio": fx["inicio"], "fecha": fx["inicio"][:10],
                     "local": fx["local"], "visita": fx["visita"], "fuentes": fuentes,
+                    "forebet_ctx": contexto_forebet(fx, fb),
                     "probs": ensamble.combinar(fuentes, prior, calib, cfg),
                     "mejores": ensamble.mejores_cuotas(casas, cfg["casas_afiladas"], cfg["casa_objetivo"]),
                     "ecuabet": casas.get(cfg["casa_objetivo"], {}), "n_casas": len(casas),
                     "xg": (pm.get("_xg_local"), pm.get("_xg_visita")) if pm else None, "esperados": esperados})
         except Exception as e:  # noqa: BLE001   (una liga mala no tumba las demás)
-            print(f"  ! liga {liga['nombre']} falló: {e.__class__.__name__}: {e}")
-            info["ligas_fallidas"].append({"liga": liga["nombre"], "error": f"{e.__class__.__name__}: {e}"})
+            print(f"  ! liga {liga['nombre']} falló: {describir(e)}")
+            info["ligas_fallidas"].append({"liga": liga["nombre"], "error": describir(e)})
         if len(partidos) == antes:
             info["ligas_sin_datos"].append(liga["nombre"])
 
+    info["cuotas_af_no_disponibles"] = bool(getattr(af, "cuotas_no_disponibles", False))
+    resumen = getattr(af, "resumen_plan", None)
+    if callable(resumen):
+        txt = resumen()
+        if txt:
+            print(f"  ! {txt}")
     info["cuota_agotada"] = bool(getattr(af, "sin_cuota", False) or getattr(af, "cuota_agotada", False))
     if info["cuota_agotada"]:
         print("  ! Cuota diaria de API-Football agotada: resultados parciales")
@@ -194,11 +244,22 @@ def analizar(cfg: dict, af, odds, forebet, ahora: datetime | None = None) -> Res
 
 
 def picks_por_dia(partidos: list[dict], cfg: dict) -> dict:
-    """{fecha: {valor, alta, seguras, grandes}} calculado día por día."""
+    """{fecha: {valor, alta, seguras, grandes, locas, combinadas}} calculado día por día."""
     out = {}
     for fecha in sorted({p["fecha"] for p in partidos}):
         del_dia = [p for p in partidos if p["fecha"] == fecha]
         valor, alta = seleccion.elegir(del_dia, cfg)
-        out[fecha] = {"valor": valor, "alta": alta, "seguras": niveles.seguras(del_dia, cfg),
-                      "grandes": niveles.grandes(del_dia, cfg)}
+        seg, grandes = niveles.seguras(del_dia, cfg), niveles.grandes(del_dia, cfg)
+        ya = {str(x["uid"]) for x in valor + alta + seg}      # un partido con pick de otro nivel no recibe Loca
+        out[fecha] = {"valor": valor, "alta": alta, "seguras": seg, "grandes": grandes,
+                      "locas": niveles.locas(del_dia, cfg, excluir_uids=ya),
+                      "combinadas": niveles.combinadas(del_dia, cfg, grandes)}
     return out
+
+
+
+def candidatos_ia(dias: dict, n_dias: int = 2) -> list[dict]:
+    """Picks que la IA revisa: Valor, Seguras, Locas y piernas de Grandes de los primeros `n_dias` días."""
+    return [x for f in sorted(dias)[:n_dias]
+            for x in dias[f]["valor"] + dias[f]["seguras"] + dias[f].get("locas", [])
+            + [p for c in dias[f]["grandes"] for p in c["piernas"]]]

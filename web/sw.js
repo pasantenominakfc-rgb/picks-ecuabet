@@ -1,6 +1,6 @@
 // Datos: siempre de la red (con respaldo en caché si no hay internet, marcado con X-Desde-Cache). App: red primero, caché de respaldo.
-const C = "picks-v3";
-const SHELL = ["./", "index.html", "app.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "icon-512-maskable.png", "apple-touch-icon.png"];
+const C = "picks-v6";
+const SHELL = ["./", "index.html", "app.js", "styles.css", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "icon-512-maskable.png", "apple-touch-icon.png"];
 self.addEventListener("install", e => e.waitUntil(
   caches.open(C).then(c => c.addAll(SHELL.map(u => new Request(u, {cache: "no-cache"})))).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(

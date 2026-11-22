@@ -8,7 +8,7 @@
 """
 import math
 
-from . import mercados as M
+from . import mercados as M, seleccion
 
 MARGEN_ECUABET = 0.94   # si no hay cuota real: cuota estimada = justa × 0.94 (margen típico ~6%)
 
@@ -159,3 +159,101 @@ def resultado_combinada(c: dict, resultados: dict) -> str | None:
 def cuota_efectiva_combinada(c: dict, resultados: dict) -> float:
     """Cuota a cobrar si la combinada ganó (sin las piernas nulas); 1.0 si todas fueron nulas."""
     return evaluar_combinada(c, resultados)[1]
+
+
+# ---------------------------------------------------------------- LOCAS (alto riesgo, alto pago)
+_AVISO_LOCAS = False     # el aviso de banca insuficiente se imprime una sola vez por proceso
+
+
+def _finito(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def locas(partidos: list[dict], cfg: dict, excluir: set | None = None, excluir_uids: set | None = None) -> list[dict]:
+    """Simples de cuota alta (3 a 12 por defecto). ALTO RIESGO: se gana pocas veces; el stake es mínimo.
+    Solo con cuota REAL de casas (cuota_ecuabet o mejor_cuota): sin ella no se generan (no se inventa EV con
+    cuotas estimadas, ni con las de referencia de Forebet). Filtros: probabilidad >= locas_prob_min, EV >= locas_ev_min
+    y el mismo consenso que Valor (fuente externa, min_fuentes, dispersión, acuerdo; IA con riesgo alto fuera).
+    Se descartan valores no finitos (NaN/inf), p fuera de (0, 1) y "sin empate" (su p es condicional).
+    Una por partido, máx. `locas_max_dia`, con tope de exposición diaria. `excluir` = {(uid, clave)} y `excluir_uids` =
+    {uid} ya usados en otro nivel (un partido con pick de Valor/Alta/Seguras no recibe Loca).
+    Banca: con el stake mínimo (`stake_minimo`) y 1.5% de exposición, banca 100 admite 1 Loca/día y 200 o más, 3."""
+    global _AVISO_LOCAS
+    cmin, cmax = cfg.get("locas_cuota_min", 3.0), cfg.get("locas_cuota_max", 12.0)
+    pmin, evmin = cfg.get("locas_prob_min", 0.12), cfg.get("locas_ev_min", 0.10)
+    banca = cfg["banca"]
+    excluir = {(str(u), c) for u, c in (excluir or set())}
+    excluir_uids = {str(u) for u in (excluir_uids or set())}
+    elegidas = []
+    for pa in partidos:
+        if str(pa["uid"]) in excluir_uids:
+            continue
+        cands = pa.get("evaluadas") or seleccion.evaluar(pa, cfg)
+        buenas = []
+        for s in cands:
+            if M.familia(s["clave"]) == "dnb" or (str(pa["uid"]), s["clave"]) in excluir:
+                continue
+            cuota = s.get("cuota_ecuabet") or s.get("mejor_cuota")
+            p, disp, acuerdo, conf = s.get("p"), s.get("dispersion"), s.get("acuerdo"), s.get("confianza", 1.0)
+            push = s.get("p_push") or 0.0
+            if not all(_finito(x) for x in (p, cuota, disp, acuerdo, conf, push)) or not 0 < p < 1:
+                continue
+            ev = M.valor_esperado(p, cuota, push)
+            det = s.get("detalle") or {}
+            # condiciones positivas: cualquier comparación dudosa descarta
+            if not (cmin <= cuota <= cmax and p >= pmin and _finito(ev) and ev >= evmin
+                    and disp <= cfg.get("max_dispersion", 0.08)
+                    and seleccion.contar_fuentes(det) >= cfg.get("min_fuentes", 2)
+                    and seleccion.tiene_fuente_externa(det)
+                    and acuerdo >= cfg.get("min_acuerdo", 0.67)
+                    and (s.get("ia") or {}).get("riesgo") != "alto"):
+                continue
+            buenas.append((ev * conf, ev, cuota, s))
+        if buenas:
+            puntaje, ev, cuota, s = max(buenas, key=lambda t: t[0])
+            base = {k: pa.get(k) for k in ("uid", "af_id", "liga", "region", "fecha", "inicio", "local", "visita", "xg", "esperados")}
+            elegidas.append((puntaje, base | s | {"ev": ev, "cuota_calc": cuota, "confirmado": bool(s.get("cuota_ecuabet")),
+                                                  "nivel": "locas"}))
+    elegidas.sort(key=lambda t: -t[0])
+    monto = max(cfg.get("stake_minimo", 1.0), math.floor(banca * cfg.get("locas_stake_pct", 0.005) * 4 + 1e-9) / 4)
+    tope_dia = cfg.get("locas_exposicion_dia_pct", 0.015) * banca
+    if elegidas and (monto > cfg.get("stake_max_pct", 0.03) * banca + 1e-9 or monto > tope_dia + 1e-9):
+        if not _AVISO_LOCAS:
+            _AVISO_LOCAS = True
+            print("  ! Locas: con esta banca el stake mínimo supera el tope diario de Locas (o el tope por pick): "
+                  "no se recomiendan Locas")
+        return []
+    usado, out = 0.0, []
+    for _, s in elegidas[: cfg.get("locas_max_dia", 3)]:
+        if usado + monto <= tope_dia + 1e-9:
+            usado += monto
+            out.append({**s, "monto": monto})
+    return out
+
+
+# ---------------------------------------------------------------- COMBINADAS candidatas (sin objetivo de cobro)
+_OBJETIVOS_COMB = (3, 4, 5, 6, 8, 10, 12, 15, 25, 30, 50, 60)   # sin 20/40/100: son los de Grandes por defecto
+
+
+def combinadas(partidos: list[dict], cfg: dict, grandes_dia: list[dict] | None = None) -> list[dict]:
+    """Combinadas candidatas con cuota total 3-60 y p >= 0.05 (máx. 10/día), con las mismas reglas de piernas que
+    Grandes (una por partido, p >= grandes_prob_min_pierna, misma dispersión). No fuerza ningún objetivo de cobro:
+    `objetivo` = None. Con pocas piernas queda vacío."""
+    monto = cfg.get("grandes_monto", 5.0)
+    pool = _pool_combinadas(partidos, cfg)
+    vistas, out = set(), []
+    for g in grandes_dia or []:      # no repetir lo que ya sale como Grande
+        vistas.add(frozenset((str(x["uid"]), x["clave"]) for x in g["piernas"]))
+    for obj in _OBJETIVOS_COMB:
+        c = armar_combinada(pool, obj, cfg.get("grandes_max_piernas", 8))
+        if not c or len(c["piernas"]) < 2 or not 3.0 <= c["cuota"] <= 60.0 or c["p"] < 0.05:
+            continue
+        clave = frozenset((str(s["uid"]), s["clave"]) for s in c["piernas"])
+        if clave in vistas:
+            continue
+        vistas.add(clave)
+        out.append({"objetivo": None, "monto": monto, "ganancia": round(monto * (c["cuota"] - 1), 2),
+                    "pago": round(monto * c["cuota"], 2), **c})
+    out.sort(key=lambda c: -c["p"])
+    return out[:10]
+

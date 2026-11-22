@@ -12,6 +12,7 @@ import time
 import requests
 
 from ..config import DATOS
+from ..errores import describir
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -75,7 +76,7 @@ class AnalistaIA:
                     self.cache_ruta.write_text(json.dumps(self.cache, ensure_ascii=False))
                     return d
             except Exception as e:  # noqa: BLE001
-                print(f"  ! Groq: {e}")
+                print(f"  ! Groq: {describir(e)}")
         return None
 
     def revisar(self, partidos: list[dict], candidatos: list[dict], cfg: dict) -> int:
@@ -83,7 +84,8 @@ class AnalistaIA:
         por_uid = {pa["uid"]: pa for pa in partidos}
         w, tope = cfg.get("ia_peso", 0.15), cfg.get("ia_ajuste_max", 0.08)
         n, vistos = 0, set()
-        for c in sorted(candidatos, key=lambda c: -c.get("p", 0)):
+        # las Locas primero (pocas y de alto riesgo), luego por probabilidad
+        for c in sorted(candidatos, key=lambda c: (c.get("nivel") != "locas", -c.get("p", 0))):
             key = (c["uid"], c["clave"])
             pa = por_uid.get(c["uid"])
             if key in vistos or not pa or c["clave"] not in pa["probs"]:

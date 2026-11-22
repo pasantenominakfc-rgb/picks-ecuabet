@@ -4,13 +4,32 @@ import math
 from . import mercados as M
 
 
+GRUPO_ESTADISTICO = {"elo", "modelo", "penaltyblog"}   # misma familia de datos históricos: cuentan 1 EN CONJUNTO
+FUENTES_EXTERNAS = {"mercado", "forebet", "apifootball"}
+
+
 def contar_fuentes(detalle: dict) -> int:
-    """Fuentes independientes para el consenso: la IA no cuenta (solo ajusta p) y los dos modelos
-    estadísticos propios ('modelo' y 'penaltyblog', mismos datos de goles) cuentan como UNA."""
+    """Fuentes independientes para el consenso. Decisión de negocio: 'elo', 'modelo' y 'penaltyblog' forman UN SOLO
+    grupo estadístico (cuentan 1 en conjunto, aunque opinen los tres). La IA no cuenta (solo ajusta p)."""
     nombres = {k for k in detalle if k != "ia"}
-    if "modelo" in nombres and "penaltyblog" in nombres:
-        nombres.discard("penaltyblog")
-    return len(nombres)
+    n_grupo = 1 if nombres & GRUPO_ESTADISTICO else 0
+    return len(nombres - GRUPO_ESTADISTICO) + n_grupo
+
+
+def tiene_fuente_externa(detalle: dict) -> bool:
+    """Valor exige al menos una fuente fuera del grupo estadístico (mercado, forebet o apifootball)."""
+    return bool(set(detalle) & FUENTES_EXTERNAS)
+
+
+def _acuerdo(detalle: dict, ref: float) -> float:
+    """Fracción de votos que ven valor a la cuota `ref`. El grupo estadístico (elo+modelo+penaltyblog) vota UNA vez:
+    sí si la mayoría de sus miembros presentes ve valor. La IA no vota."""
+    grupo = [ps for f, ps in detalle.items() if f in GRUPO_ESTADISTICO]
+    otros = [ps for f, ps in detalle.items() if f != "ia" and f not in GRUPO_ESTADISTICO]
+    votos = [ps * ref > 1 for ps in otros]
+    if grupo:
+        votos.append(2 * sum(1 for ps in grupo if ps * ref > 1) > len(grupo))
+    return sum(votos) / max(1, len(votos))
 
 
 def kelly(p: float, cuota: float, p_push: float, cfg: dict) -> float:
@@ -39,8 +58,7 @@ def evaluar(partido: dict, cfg: dict) -> list[dict]:
         ref = ecuabet or mejor
         ev = M.valor_esperado(p, ref, p_push) if ref else None
         n_ind = contar_fuentes(info["detalle"])
-        votos = [ps for f, ps in info["detalle"].items() if f != "ia"]
-        acuerdo = (sum(1 for ps in votos if ps * ref > 1) / max(1, len(votos))) if ref else None
+        acuerdo = _acuerdo(info["detalle"], ref) if ref else None
         conf = min(1.0, n_ind / 3) * max(0.0, 1 - info["dispersion"] / (2 * cfg["max_dispersion"]))
         out.append({"clave": k, "nombre": M.nombre(k, partido["local"], partido["visita"]),
                     "mercado": M.FAMILIAS[M.familia(k)], "p": p, "p_push": p_push,
@@ -55,7 +73,8 @@ def evaluar(partido: dict, cfg: dict) -> list[dict]:
 def _pasa_basico(s: dict, cfg: dict) -> bool:
     return (cfg["cuota_min"] <= s["cuota_justa"] <= cfg["cuota_max"]
             and (contar_fuentes(s["detalle"]) if "detalle" in s else s["n_fuentes"]) >= cfg["min_fuentes"]
-            and s["dispersion"] <= cfg["max_dispersion"])
+            and s["dispersion"] <= cfg["max_dispersion"]
+            and (tiene_fuente_externa(s["detalle"]) if "detalle" in s else True))
 
 
 def elegir(partidos: list[dict], cfg: dict) -> tuple[list[dict], list[dict]]:

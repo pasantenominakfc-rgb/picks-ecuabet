@@ -6,7 +6,7 @@ Sudamérica, de hoy a +5 días) y entrega picks para apostar en **Ecuabet**
 (Ecuador). Se usa desde una **app web instalable (PWA)** en `web/`. El motor en
 Python corre en GitHub Actions y publica la web en GitHub Pages.
 
-**Perfil activo: plan GRATIS de API-Football** (100 consultas/día, 10/min): hoy +2 días, 11 ligas
+**Perfil activo: plan GRATIS de API-Football** (100 consultas/día, 10/min): hoy +1 día, 11 ligas
 (LigaPro, Champions, Europa League, Premier, LaLiga, Serie A, Bundesliga, Ligue 1, Libertadores,
 Sudamericana, MLS) y pocas predicciones. El perfil completo (todas las ligas, +5 días) está
 documentado como `perfil_pro` en `config.yaml` y requiere un plan de pago.
@@ -22,16 +22,35 @@ falla. Si pierdes `DB_KEY` se pierde el historial. `web/data/*.json` está en `.
 El usuario está en Ecuador (zona horaria America/Guayaquil) y habla español.
 **Todo texto para el usuario va en español.**
 
-## Tres niveles de picks
+## Niveles de picks (Seguras, Valor, Grandes, Locas y Combinadas)
 - **Seguras:** simples con probabilidad ≥ 72% y cuota 1.25–1.60 (2% de la banca). Usan la
   **cuota estimada de Ecuabet** (justa × 0.94, o la real si la anotaste), no una cuota verificada.
 - **Valor:** EV ≥ 4% contra la mejor cuota (Kelly 1/4, tope 3% por pick y 10% por día). El consenso
   de **≥ 2 fuentes** se exige solo aquí. La IA ajusta la probabilidad pero **no cuenta como fuente**.
+  `elo`, `modelo` y `penaltyblog` forman UN solo grupo estadístico (cuentan 1 en conjunto): Valor exige además
+  al menos una fuente externa (mercado, Forebet o API-Football).
+  **LigaPro Ecuador no tiene `odds_key`** (no se verificó una clave de The Odds API): sin cuotas de casas no hay
+  fuente "mercado" ni cuota real, así que ahí no sale Valor (sí Seguras con cuota estimada).
 - **Grandes:** combinadas con objetivo de **cobro total** `grandes_objetivos: [100, 200, 500]` y monto
   `grandes_monto` (config.yaml); la cuota objetivo es objetivo/monto. (CLAUDE.md decía $50–$1000: era
   el rango de la web; el motor usa la lista del config.) Lo público es la ganancia NETA
   `monto*(cuota-1)` y `cobro_total` aparte. El algoritmo elige las piernas con mejor eficiencia
   `-log(p)/log(cuota)`, una por partido.
+- **Locas (ALTO RIESGO):** simples de cuota 3-12, p >= 0.12, EV >= 0.10 con cuota REAL de casas (`cuota_ecuabet` o
+  `mejor_cuota`); sin cuota real NO se generan. Mismo consenso que Valor (fuente externa, min_fuentes, dispersión,
+  acuerdo). Stake `locas_stake_pct` (0.5%, mínimo `stake_minimo`), máx. `locas_max_dia` (3) y exposición
+  `locas_exposicion_dia_pct` (1.5%). Tipo `locas` en el tracker (ROI separado). `hoy.json`: `dias[f].locas` (campos de
+  `valor` + `nivel`, `stake`). Descarta NaN/inf, p fuera de (0,1), "sin empate" y todo partido que ya tenga pick de
+  Valor/Alta/Seguras. Con stake mínimo 1.0 y 1.5% de exposición: banca 100 admite 1 Loca/día, 200+ admiten 3; si ni
+  una cabe se imprime un aviso. La IA revisa las Locas primero.
+  El `acuerdo` (min_acuerdo) cuenta el grupo estadístico (elo+modelo+penaltyblog) como UN voto (mayoría del grupo).
+  Las Combinadas no repiten las piernas de Grandes. ClubElo solo por https (sin fallback http).
+- **Combinadas:** `dias[f].combinadas`: candidatas con cuota 3-60, p >= 0.05, máx. 10/día, piernas como Grandes, `objetivo` None.
+- **Forebet asíncrono:** run de Apify con sondeo cada ~10 s hasta `forebet_espera_max_seg` (480 s); al agotarse se aborta y
+  se sigue sin Forebet. `partidos[].forebet_ctx` (forma, posición, tendencia, marcador, goles, valor %, clima) es solo
+  informativo. Sus **cuotas** (`cuotas_ref`) son REFERENCIA ESTIMADA (casa no nombrada, no de Ecuabet): no entran a
+  `mercado`, ni cuentan como fuente, ni sirven para EV. Los nombres de campos de forma/posición/clima son suposiciones
+  (no probado con el actor real).
 - Mercados de resultado: se liquidan a los **90 minutos** (tiempo reglamentario, sin prórroga/AET).
 
 ## Arquitectura
@@ -42,8 +61,9 @@ config.yaml                 TODO lo ajustable: banca, filtros, ligas (40+), peso
 picks/
   pipeline.py               analizar(): partidos hoy..+N días, fuentes → ensamble; picks_por_dia()
   fuentes/apifootball.py    API-Football (base): partidos, cuotas de todos los mercados, predicciones, stats
-  fuentes/forebet.py        Forebet vía el actor de Apify solidcode/forebet-scraper
-  fuentes/oddsapi.py        The Odds API (Pinnacle/Betfair)
+  fuentes/forebet.py        Forebet vía el actor de Apify solidcode/forebet-scraper (requiere APIFY_TOKEN)
+  fuentes/oddsapi.py        The Odds API (Pinnacle/Betfair); requiere ODDS_API_KEY (sin ella no hay cuotas de casas)
+  fuentes/clubelo.py        ClubElo (gratis, sin clave): ratings Elo -> 1X2/dc/dnb; fuente "elo" solo en ligas de Europa; elo+modelo+penaltyblog = UN solo grupo estadístico (cuentan 1 en conjunto)
   fuentes/footballdata.py   histórico football-data.co.uk (goles, córners, tarjetas, cuotas)
   fuentes/ia.py             Groq groq/compound (busca noticias): ajusta p ±8 pts y marca riesgo
   modelos/goles.py          Dixon-Coles + derivación de los 73 mercados desde la matriz de goles
@@ -71,7 +91,7 @@ tests/test_exportar.py      pytest: los JSON públicos no filtran banca/dólares
 ```
 
 ## Secrets (GitHub → Settings → Secrets → Actions)
-`API_FOOTBALL_KEY` (obligatoria), `DB_KEY` (obligatoria: clave larga que cifra la base), `APIFY_TOKEN`, `ODDS_API_KEY`, `GROQ_API_KEY`,
+ClubElo no necesita clave. `API_FOOTBALL_KEY` (obligatoria), `DB_KEY` (obligatoria: clave larga que cifra la base), `APIFY_TOKEN`, `ODDS_API_KEY`, `GROQ_API_KEY`,
 `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`. Variable opcional: `BANCA`.
 Nunca subas claves al repositorio.
 
