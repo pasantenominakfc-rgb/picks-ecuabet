@@ -363,7 +363,7 @@ def test_filtros_de_apuesta_intactos_en_config():
     cfg = config.cargar()
     assert cfg["min_fuentes"] == 2 and cfg["ventaja_minima"] == 0.04 and cfg["max_dispersion"] == 0.08
     assert cfg["seguras_prob_min"] == 0.72
-    assert cfg["dias_adelante"] == 1 and cfg["odds_max_llamadas_corrida"] == 4 and cfg["max_ligas_analizadas"] == 25
+    assert cfg["dias_adelante"] == 1 and cfg["odds_max_llamadas_corrida"] == 8 and cfg["max_ligas_analizadas"] == 25
 
 
 # ------------------------------------------ revisión: presupuesto Odds API (12 h, 4 por corrida, nombre nuevo)
