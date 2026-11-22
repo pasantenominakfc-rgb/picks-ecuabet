@@ -1,0 +1,51 @@
+# Lo dispara la página web al tocar "Registrar apuestas" o "No aposté".
+name: Registrar apuesta
+on:
+  workflow_dispatch:
+    inputs:
+      accion: {description: "registrar u omitir", required: true, default: registrar}
+      uid: {description: "id del partido", required: true}
+      clave: {description: "mercado", required: true}
+      cuota: {description: "cuota tomada en Ecuabet", required: false, default: "0"}
+      monto: {description: "monto apostado", required: false, default: "0"}
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: picks
+  cancel-in-progress: false
+jobs:
+  registrar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Registrar
+        env:
+          ACCION: ${{ inputs.accion }}
+          PICK_UID: ${{ inputs.uid }}
+          CLAVE: ${{ inputs.clave }}
+          CUOTA: ${{ inputs.cuota }}
+          MONTO: ${{ inputs.monto }}
+        run: |
+          if [ "$ACCION" = "omitir" ]; then python main.py omitir-web "$PICK_UID" "$CLAVE";
+          else python main.py registrar-web "$PICK_UID" "$CLAVE" "$CUOTA" "$MONTO"; fi
+      - name: Guardar
+        run: |
+          git config user.name "picks-bot"
+          git config user.email "picks-bot@users.noreply.github.com"
+          for p in web/data datos/sistema.db; do [ -e "$p" ] && git add -A "$p"; done; true
+          git commit -m "Registro $ACCION $(date -u +%F_%H%M)" || echo "Sin cambios"
+          git pull --rebase --autostash && git push
+        env: {ACCION: "${{ inputs.accion }}"}
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: web}
+  publicar:
+    needs: registrar
+    runs-on: ubuntu-latest
+    environment: {name: github-pages}
+    steps:
+      - uses: actions/deploy-pages@v4

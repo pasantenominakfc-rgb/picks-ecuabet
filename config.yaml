@@ -1,0 +1,93 @@
+# ==========================================================
+#  Configuración del sistema de picks (v2: multi-mercado y multi-fuente)
+# ==========================================================
+# Claves: mejor como variables de entorno (o "secrets" de GitHub):
+#   API_FOOTBALL_KEY  -> https://dashboard.api-football.com (obligatoria; gratis 100/día)
+#   ODDS_API_KEY      -> https://the-odds-api.com (opcional; cuotas de Pinnacle/Betfair)
+#   APIFY_TOKEN       -> https://console.apify.com (opcional; predicciones de Forebet)
+
+# --- Tu banca --------------------------------------------------------------
+banca: 100.0
+fraccion_kelly: 0.25
+stake_max_pct: 0.03
+exposicion_dia_pct: 0.10
+stake_minimo: 1.0
+
+# --- Mercados que ofrece Ecuabet y quieres analizar -------------------------
+mercados_activos: [1x2, dc, dnb, ou, btts, tl, tv, ah, ht1x2, htou, corners, cards]
+peso_roja: 1              # cuánto cuenta una roja en "tarjetas totales" (revisa la regla de Ecuabet)
+
+# --- Filtros para minimizar el error ----------------------------------------
+ventaja_minima: 0.04      # valor esperado mínimo (+4%)
+cuota_min: 1.30
+cuota_max: 4.00
+min_fuentes: 2            # al menos 2 fuentes independientes deben opinar sobre ese mercado
+max_dispersion: 0.08      # desacuerdo máximo entre fuentes (desviación estándar de probabilidades)
+min_acuerdo: 0.67         # 2 de cada 3 fuentes deben ver valor por separado
+max_picks_dia: 6
+
+# Sección "alta probabilidad" (sin cuota de referencia, p. ej. tarjetas en ligas sin mercado)
+alta_prob_min: 0.72
+alta_cuota_justa_min: 1.25
+max_alta_prob: 6
+
+horas_adelante: 30
+
+# Combinada opcional (Ecuabet permite cargarla en un solo código). Ojo: el margen
+# de la casa se multiplica en cada selección; las simples son más rentables.
+combinada_selecciones: 2
+combinada_prob_min: 0.55
+
+# Dirección de tu página (se agrega al mensaje de Telegram)
+url_web: 
+
+# --- Niveles: seguras y grandes ------------------------------------------------
+seguras_prob_min: 0.72        # probabilidad mínima de una "segura"
+seguras_cuota_min: 1.25
+seguras_cuota_max: 1.60
+seguras_stake_pct: 0.02       # 2% de la banca por segura
+max_seguras: 8
+grandes_objetivos: [100, 200, 500]   # ganancia objetivo de las combinadas
+grandes_monto: 5.0            # monto por combinada
+grandes_prob_min_pierna: 0.55
+grandes_max_piernas: 8
+niveles_min_fuentes: 1
+
+# --- Pesos iniciales de cada fuente (se ajustan solos con el historial) ------
+pesos_iniciales:
+  mercado: 0.45       # cuotas sin margen (Pinnacle/Betfair o mediana de casas)
+  modelo: 0.15        # modelos propios: Dixon-Coles (goles) + córners + tarjetas
+  penaltyblog: 0.10   # Poisson bivariado de la librería penaltyblog
+  forebet: 0.20
+  apifootball: 0.05
+  ia: 0.05            # analista de IA (Groq) — solo en los picks que revisa
+
+# --- Analista de IA (Groq) -----------------------------------------------------
+# Clave gratis en https://console.groq.com (variable GROQ_API_KEY)
+ia_modelo: groq/compound      # busca en la web: lesiones, alineaciones, noticias
+ia_max_consultas: 15          # picks revisados por día
+ia_peso: 0.15                 # cuánto mueve la IA la probabilidad (con tope)
+ia_ajuste_max: 0.08           # máximo ±8 puntos
+calib_n0: 150             # muestras para confiar en el historial de una fuente
+calib_tau: 0.01           # qué tan fuerte castigar a la fuente con más error
+stats_calibracion_dia: 8  # partidos/día a los que se les bajan córners/tarjetas para medir error
+
+casas_afiladas: [pinnacle, betfair, betfair_ex_eu, betfairexchange, matchbook]
+casa_objetivo: ecuabet
+forebet_linea_tarjetas: 4.5   # línea que usa Forebet en su pronóstico de tarjetas (verificar)
+max_predicciones_af: 40       # consultas /predictions por día (plan gratis: cuida el límite de 100)
+
+# --- Ligas ------------------------------------------------------------------
+# af: id en API-Football | odds_key: The Odds API | fd: football-data (histórico con córners/tarjetas)
+ligas:
+  - {nombre: Premier League,   af: 39,  odds_key: soccer_epl,                        fd: E0,  tipo: main}
+  - {nombre: LaLiga,           af: 140, odds_key: soccer_spain_la_liga,              fd: SP1, tipo: main}
+  - {nombre: Serie A,          af: 135, odds_key: soccer_italy_serie_a,              fd: I1,  tipo: main}
+  - {nombre: Bundesliga,       af: 78,  odds_key: soccer_germany_bundesliga,         fd: D1,  tipo: main}
+  - {nombre: Ligue 1,          af: 61,  odds_key: soccer_france_ligue_one,           fd: F1,  tipo: main}
+  - {nombre: Champions League, af: 2,   odds_key: soccer_uefa_champs_league}
+  - {nombre: Brasileirão,      af: 71,  odds_key: soccer_brazil_campeonato,          fd: BRA, tipo: extra}
+  - {nombre: Liga Argentina,   af: 128, odds_key: soccer_argentina_primera_division, fd: ARG, tipo: extra}
+  - {nombre: Libertadores,     af: 13,  odds_key: soccer_conmebol_copa_libertadores}
+  - {nombre: Sudamericana,     af: 11,  odds_key: soccer_conmebol_copa_sudamericana}
+  - {nombre: LigaPro Ecuador,  af: 242}
