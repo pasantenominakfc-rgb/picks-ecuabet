@@ -23,6 +23,16 @@ jobs:
           tok = os.environ.get("APIFY_TOKEN", "")
           if not tok:
               print("FALTA el secret APIFY_TOKEN"); sys.exit(1)
+          # 1) ¿el token es válido? (no ejecuta nada ni cuesta crédito)
+          print("longitud del token:", len(tok), "| espacios o saltos al borde:", tok != tok.strip(), "| empieza por apify_api_:", tok.startswith("apify_api_"))
+          try:
+              u = urllib.request.Request("https://api.apify.com/v2/users/me", headers={"Authorization": "Bearer " + tok})
+              with urllib.request.urlopen(u, timeout=30) as r:
+                  d = json.load(r).get("data", {})
+              print("token válido. plan:", d.get("plan", {}).get("id") if isinstance(d.get("plan"), dict) else d.get("plan"))
+          except urllib.error.HTTPError as e:
+              print("users/me HTTP", e.code, "=> el token NO es válido" if e.code == 401 else "")
+              sys.exit(1)
           hoy = (datetime.now(timezone.utc) - timedelta(hours=5)).date()
           cuerpo = {"matchScope": "byDate", "startDate": str(hoy), "endDate": str(hoy),
                     "countries": [], "leagues": [], "maxResults": 5}
